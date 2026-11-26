@@ -4,6 +4,7 @@
 > * Mã lớp / Khóa: **K67**
 > * Trường: **Học viện Nông nghiệp Việt Nam**
   * Portfolio: https://phamngocduong.vercel.app/
+> * **Phiên bản: 1.0.1** (cập nhật 26/11/2026)
 ---
 
 ## 1. Giới thiệu chung
@@ -267,6 +268,13 @@ Hệ thống tổ chức dữ liệu chặt chẽ qua 30 bảng quan hệ trong 
 | `npm run build` | Đóng gói ứng dụng để triển khai production. |
 | `npm run preview` | Xem trước bản build production cục bộ. |
 | `npm run lint` | Kiểm tra chất lượng mã nguồn bằng ESLint. |
+
+## Lịch sử phiên bản
+
+| Phiên bản | Ngày | Nội dung |
+| :--- | :--- | :--- |
+| **1.0.1** | 26/11/2026 | Sửa lỗi thí sinh **kiêm nhiệm**: phòng chính không thuộc phạm vi kỳ thi nhưng phòng kiêm nhiệm được thi thì không còn bị chặn. Hệ thống tự gán vào kỳ thi theo phòng hợp lệ khi vào thi (`exam-attempt.service.js`) và ngay khi đổi phòng ban (`user.service.js`). |
+| 1.0.0 | — | Bản hoàn thiện ban đầu. |
 
 ---
 *Bản quyền sản phẩm thuộc về tác giả Phạm Ngọc Dương - Sinh viên K67 - Khoa Công nghệ thông tin - Học viện Nông nghiệp Việt Nam.*

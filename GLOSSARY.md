@@ -2,6 +2,8 @@
 ## Hệ Thống Thi Trắc Nghiệm Chuyên Môn Nội Bộ — Nhà Máy Z176
 **Người thực hiện:** Phạm Ngọc Dương — VNUA | **Dự án:** Hệ thống thi trắc nghiệm chuyên môn nội bộ Z176
 
+**Phiên bản tài liệu: 1.0.1** (cập nhật 26/11/2026, đồng bộ với phiên bản hệ thống 1.0.1)
+
 **Mục đích:** Định nghĩa và chuẩn hóa **một tên gọi duy nhất** cho mỗi khái niệm nghiệp vụ, model cơ sở dữ liệu, vai trò người dùng và thuật ngữ kỹ thuật trong toàn bộ dự án. Mọi thành viên và AI coding assistant phải tuân thủ nghiêm ngặt các thuật ngữ này khi đặt tên model, controller, service, component, routes, state hay viết tài liệu kỹ thuật để đảm bảo tính nhất quán.
 
 ---
@@ -11,7 +13,7 @@
 | Thuật ngữ tiếng Việt | Tên gọi chuẩn trong code / Model | Định nghĩa | Ghi chú |
 |---|---|---|---|
 | Ngân hàng câu hỏi | `Question` / `QuestionBank` | Tập hợp toàn bộ câu hỏi trắc nghiệm chuyên môn, được phân loại theo chủ đề, độ khó, phạm vi và dạng câu trả lời. | Quản lý tại `QuestionBankTab.jsx`, API `/api/questions`. |
-| Câu hỏi | `Question` | Đơn vị câu hỏi trắc nghiệm. Gồm nội dung, ảnh minh họa (Cloudinary), độ khó (`easy`/`medium`/`hard`), phạm vi (`Common`/`DepartmentSpecific`), loại câu (`theory`/`practice`), kiểu đáp án (`single`/`multiple`). | Đáp án liên kết qua collection `Answer`. |
+| Câu hỏi | `Question` | Đơn vị câu hỏi trắc nghiệm. Gồm nội dung, ảnh minh họa (Cloudinary), độ khó (`easy`/`medium`/`hard`), phạm vi (`Common`/`DepartmentSpecific`), loại câu (`theory`/`practice`), kiểu đáp án (`single`/`multiple`). | Đáp án liên kết qua bảng `Answer`. |
 | Đáp án câu hỏi | `Answer` | Danh sách đáp án của một câu hỏi, gồm nội dung text và cờ `isCorrect`. | **Tuyệt đối không** trả về `isCorrect` cho thí sinh khi lấy đề thi. |
 | Chủ đề thi | `Topic` | Nhóm/chuyên đề kiến thức chuyên môn (ví dụ: An toàn lao động, Quy trình kỹ thuật...). | Quản lý tại `TopicTab.jsx`, API `/api/topics`. |
 | Phòng ban / Phân xưởng | `Department` | Đơn vị/phòng ban/phân xưởng trong nhà máy (ví dụ: XDM1, P.Kế hoạch, P.Kỹ thuật...). | Quản lý tại `DepartmentTab.jsx`, API `/api/departments`. |
@@ -19,6 +21,8 @@
 | Kỳ thi / Đề xuất kỳ thi | `Exam` | Kỳ thi chuyên môn. Chứa cấu hình đề thi (số câu theo độ khó, thời lượng, điểm đạt, số lượt thi tối đa) và trạng thái vòng đời (`draft` → `pending_review` → `approved` → `published` → `archived`). | Không dùng `Test` hay `Quiz`. |
 | Mã đề thi | `ExamCode` | Bộ đề cụ thể được hệ thống xáo trộn ngẫu nhiên thứ tự câu hỏi và đáp án từ ngân hàng câu hỏi khi kỳ thi được duyệt phát hành (`published`). | Một `Exam` có nhiều `ExamCode` (đảo câu hỏi/đáp án). |
 | Câu hỏi trong mã đề | `ExamCodeQuestion` | Bảng liên kết câu hỏi và thứ tự hiển thị trong một mã đề thi cụ thể. | |
+| Phòng kiêm nhiệm | `employee_extra_departments` | Phòng ban phụ của một `Employee` (ngoài phòng chính `departmentId`). | Thí sinh kiêm nhiệm chỉ thi được bằng phòng nằm trong phạm vi kỳ thi và đủ câu hỏi riêng. |
+| Vai trò thi | `role` / `getEmployeeRoleOptions()` | Phòng ban (chính hoặc kiêm nhiệm) mà thí sinh dùng để thi; quyết định `ExamCode`. | Khóa sau lần xác nhận đầu (`role_confirmed_at`). Nếu phòng chính ngoài phạm vi, tự chọn phòng kiêm nhiệm hợp lệ. |
 | Thí sinh trong kỳ thi | `ExamCandidate` | Danh sách thí sinh được phân bổ vào kỳ thi, gắn với một mã đề thi (`ExamCode`), theo dõi số lượt thi đã sử dụng và giới hạn lượt thi. | Cho phép Leader cấp thêm lượt thi chính thức khi cần. |
 | Lượt thi / Ca làm bài | `ExamAttempt` | Một lượt làm bài cụ thể của thí sinh (loại `practice` hoặc `official`), lưu trạng thái (`in_progress`, `submitted`, `expired`), mốc thời gian bắt đầu/kết thúc, và `lastHeartbeat`. | Thay thế cho thuật ngữ cũ `ExamSession`. |
 | Câu hỏi trong lượt thi (Autosave) | `AttemptQuestion` | Lưu tạm các đáp án thí sinh đã chọn trong quá trình làm bài phục vụ autosave và khôi phục khi reload/resume. | Tự động lưu mỗi khi thí sinh chọn đáp án. |
@@ -56,7 +60,7 @@ Hệ thống có **4 vai trò** phân quyền rõ ràng:
 | **Giữ nhịp phiên thi** | `sendExamHeartbeat()` | Cơ chế ping định kỳ (15s/lần) từ client lên server khi thí sinh đang làm bài thi. Nếu thí sinh thoát khỏi bài thi quá 1 phút, hệ thống tự động thu bài (`autoSubmitted`). |
 | **Tự động lưu bài** | `answerExamQuestion()` / `autosave` | Gửi đáp án đã chọn lên server ngay lập tức khi thí sinh bấm chọn, lưu vào `AttemptQuestion` mà không cần chờ đến lúc nộp bài. |
 | **Trộn đề ngẫu nhiên** | `exam-code-generation.service.js` | Sinh các mã đề xáo trộn thứ tự câu hỏi và thứ tự đáp án từ ngân hàng câu hỏi bằng thuật toán an toàn khi phát hành đề thi. |
-| **Sao lưu & Khôi phục** | `backup.service.js` | Dump cơ sở dữ liệu MongoDB ra file nén `.gz`, đồng bộ lên Google Drive (OAuth2 cá nhân) tự động xoay vòng (tối đa 5 bản), khôi phục trực tiếp với theo dõi tiến trình upload (`XMLHttpRequest.onprogress`). |
+| **Sao lưu & Khôi phục** | `backup.service.js` | Sao lưu SQL Server bằng `BACKUP DATABASE` ra file `.bak`, mã hóa AES-256-GCM rồi đồng bộ lên Google Drive (OAuth2 cá nhân) tự động xoay vòng (tối đa 5 bản), khôi phục trực tiếp với theo dõi tiến trình upload (`XMLHttpRequest.onprogress`). |
 | **Trợ lý AI & Soạn đề tự động** | `ai-assistant.service.js` | Kết nối LLM (Gemini / OpenAI API tương thích), đọc tài liệu (.docx, .pdf, .xlsx), hỏi đáp bám sát nội dung phòng ban và sinh file đề thi Word/Excel chuẩn hóa phục vụ kiểm duyệt. |
 
 ---
