@@ -1,6 +1,6 @@
 /**
  * Tiến trình lập lịch Sao lưu Tự động (Backup Scheduler).
- * Tự động chạy định kỳ lúc 03:00 sáng mỗi ngày để dump CSDL MongoDB, tải lên Google Drive và ghi nhật ký kiểm toán.
+ * Tự động chạy định kỳ lúc 03:00 sáng mỗi ngày để sao lưu CSDL SQL Server (.bak), tải lên Google Drive và ghi nhật ký kiểm toán.
  */
 
 import cron from 'node-cron';

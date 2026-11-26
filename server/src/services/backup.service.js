@@ -1,9 +1,8 @@
 /**
- * Service Sao lưu & Khôi phục Dữ liệu MongoDB và Tích hợp Google Drive (Backup Service).
- * Sử dụng công cụ mongodump/mongorestore nén gzip và đồng bộ trực tiếp lên Google Drive qua OAuth2.
+ * Service Sao lưu & Khôi phục CSDL SQL Server và Tích hợp Google Drive (Backup Service).
+ * Dùng BACKUP DATABASE / RESTORE DATABASE (file .bak), mã hóa AES-256-GCM rồi đồng bộ lên Google Drive qua OAuth2.
  */
 
-import { spawn } from 'child_process';
 import crypto from 'crypto';
 import { pipeline } from 'stream/promises';
 import path from 'path';
@@ -18,7 +17,7 @@ import { sql, sqlPool, closeSqlPool } from '../db/sql-server.js';
 const MAX_BACKUPS_KEPT = 5;
 const TMP_DIR = path.join(os.tmpdir(), 'z176-backups');
 
-// Đảm bảo thư mục lưu file nén tạm tồn tại trên server
+// Đảm bảo thư mục lưu file .bak tạm tồn tại trên server
 async function ensureTmpDir() {
   await fs.mkdir(TMP_DIR, { recursive: true, mode: 0o700 }); // chỉ tiến trình server đọc được bản dump chưa mã hóa
 }
@@ -46,32 +45,6 @@ function getDriveClient() {
   return google.drive({ version: 'v3', auth: oAuth2Client });
 }
 
-// Thực thi lệnh hệ thống ngoài (mongodump / mongorestore)
-function runCommand(cmd, args) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stderr = '';
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on('error', (err) => {
-      reject(
-        new ApiError(
-          500,
-          `Không thể chạy lệnh "${cmd}". Cần cài mongodb-database-tools trên server. Chi tiết: ${err.message}`,
-          'BACKUP_TOOL_NOT_FOUND'
-        )
-      );
-    });
-    child.on('close', (code) => {
-      if (code === 0) return resolve();
-      reject(
-        new ApiError(500, `Lệnh "${cmd}" thất bại (mã ${code}): ${stderr.slice(-2000)}`, 'BACKUP_COMMAND_FAILED')
-      );
-    });
-  });
-}
-
 // Xóa file tạm cục bộ sau khi hoàn thành thao tác
 async function cleanupLocalFile(filePath) {
   try {
@@ -80,19 +53,6 @@ async function cleanupLocalFile(filePath) {
     }
   } catch {
     /* best-effort cleanup */
-  }
-}
-
-// Chạy mongodump/mongorestore nhưng đưa URI (có mật khẩu) qua file --config quyền 0600 thay vì --uri trên dòng lệnh:
-// đối số của tiến trình con ai trên máy chủ cũng xem được bằng `ps`. JSON.stringify cho ra chuỗi YAML hợp lệ.
-async function runMongoTool(cmd, args) {
-  await ensureTmpDir();
-  const cfg = path.join(TMP_DIR, `mongo-${crypto.randomUUID()}.yml`);
-  await fs.writeFile(cfg, `uri: ${JSON.stringify(env.mongodbUri)}\n`, { mode: 0o600 });
-  try {
-    await runCommand(cmd, [`--config=${cfg}`, ...args]);
-  } finally {
-    await cleanupLocalFile(cfg);
   }
 }
 
@@ -126,7 +86,7 @@ async function encryptFile(src, dest, onBytes) {
   await fs.appendFile(dest, cipher.getAuthTag());
 }
 
-// File có đúng là bản backup đã mã hóa (đọc 8 byte đầu)? Bản .gz cũ chưa mã hóa vẫn khôi phục được.
+// File có đúng là bản backup đã mã hóa (đọc 8 byte đầu)? Bản .bak chưa mã hóa (dev) vẫn khôi phục được.
 async function isEncrypted(filePath) {
   const fh = await fs.open(filePath, 'r');
   try {
@@ -185,7 +145,7 @@ async function dumpToLocalFile(prefix = 'z176-backup') {
   return { filePath, fileName, size: stat.size };
 }
 
-// Tải file nén .gz lên thư mục sao lưu trên Google Drive
+// Tải file backup (.bak hoặc .bak.enc) lên thư mục sao lưu trên Google Drive
 async function uploadToDrive(filePath, fileName, onBytes) {
   const drive = getDriveClient();
   const res = await drive.files.create(
@@ -206,7 +166,7 @@ async function uploadToDrive(filePath, fileName, onBytes) {
 }
 
 // Quy trình sao lưu trọn gói: Dump DB -> Mã hóa -> Upload Drive -> Dọn file tạm
-// onProgress(phase, percent) tùy chọn: dump 0% (mongodump không báo tiến độ nên không có % thật) -> mã hóa 30-50% -> upload tới 100%.
+// onProgress(phase, percent) tùy chọn: dump 0% (BACKUP DATABASE không báo tiến độ nên không có % thật) -> mã hóa 30-50% -> upload tới 100%.
 // Không bật mã hóa (dev) thì upload chiếm 30-100%.
 async function createBackupToDrive({ prefix = 'z176-backup', onProgress } = {}) {
   const encrypt = Boolean(env.backupEncryptionKey);

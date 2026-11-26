@@ -15,7 +15,7 @@ import {
 import { fetchBackups, downloadBackupFile, restoreBackupFile } from '../../services/admin.service';
 
 // Cụm từ bắt buộc gõ đúng (không dấu, dễ gõ) trước khi cho phép bấm khôi
-// phục — thao tác này mongorestore --drop XOÁ TOÀN BỘ dữ liệu hiện tại rồi
+// phục — thao tác này RESTORE DATABASE ... WITH REPLACE XOÁ TOÀN BỘ dữ liệu hiện tại rồi
 // ghi đè, không có đường lùi, nên chỉ 1 nút "Xác nhận" bình thường là chưa
 // đủ an toàn cho 1 thao tác nghiêm trọng như thế này.
 const CONFIRM_PHRASE = 'XOA DU LIEU HIEN TAI';
@@ -133,8 +133,8 @@ export const BackupTab = () => {
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0] ?? null;
-    if (file && !/\.gz(\.enc)?$/.test(file.name)) {
-      setError('Chỉ chấp nhận file .gz hoặc .gz.enc (được tạo từ chức năng backup).');
+    if (file && !/\.bak(\.enc)?$/i.test(file.name)) {
+      setError('Chỉ chấp nhận file .bak hoặc .bak.enc (được tạo từ chức năng backup).');
       setSelectedFile(null);
       return;
     }
@@ -290,7 +290,7 @@ export const BackupTab = () => {
           <div>
             <h3 className="text-base sm:text-lg font-bold text-[#0F172A]">Khôi phục dữ liệu</h3>
             <p className="text-sm text-slate-600 mt-1">
-              Chọn 1 file sao lưu (.gz/.gz.enc) — có thể tải từ danh sách phía trên hoặc file backup đã lưu sẵn trên máy.
+              Chọn 1 file sao lưu (.bak/.bak.enc) — có thể tải từ danh sách phía trên hoặc file backup đã lưu sẵn trên máy.
               Thao tác này sẽ <b>XOÁ TOÀN BỘ dữ liệu hiện tại</b> và ghi đè bằng dữ liệu trong file, không thể hoàn
               tác. Toàn bộ phiên đăng nhập hiện có (kể cả của chính bạn) có thể bị ảnh hưởng nếu tài khoản không còn
               tồn tại sau khi khôi phục.
@@ -300,11 +300,11 @@ export const BackupTab = () => {
 
         <div className="space-y-3">
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1.5">File sao lưu (.gz / .gz.enc)</label>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5">File sao lưu (.bak / .bak.enc)</label>
             <input
               ref={fileInputRef}
               type="file"
-              accept=".gz,.enc"
+              accept=".bak,.enc"
               onChange={handleFileChange}
               disabled={isRestoring}
               className="block w-full text-sm text-slate-600 file:mr-3 file:py-2 file:px-3.5 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-[#008BC5] file:text-white hover:file:bg-[#007ba1] disabled:opacity-50"

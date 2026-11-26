@@ -153,7 +153,7 @@ export async function fetchBackups() {
 }
 
 /**
- * Tải 1 bản backup cụ thể (.gz) về máy admin — dùng làm bước trung gian
+ * Tải 1 bản backup cụ thể (.bak) về máy admin — dùng làm bước trung gian
  * trước khi khôi phục (tải về máy rồi mới upload lại qua form khôi phục),
  * vì API /restore chỉ nhận file upload trực tiếp, không nhận fileId trên Drive.
  * Không dùng apiRequest() (parse JSON) vì response là file nhị phân.
@@ -163,7 +163,7 @@ export async function downloadBackupFile(fileId, fileName) {
   delete headers['Content-Type'];
 
   const res = await fetch(
-    `${API_BASE_URL}/backups/${fileId}/download?fileName=${encodeURIComponent(fileName || 'backup.gz')}`,
+    `${API_BASE_URL}/backups/${fileId}/download?fileName=${encodeURIComponent(fileName || 'backup.bak')}`,
     { method: 'GET', credentials: 'include', headers },
   );
 
@@ -182,7 +182,7 @@ export async function downloadBackupFile(fileId, fileName) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = fileName || 'backup.gz';
+  a.download = fileName || 'backup.bak';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -190,13 +190,13 @@ export async function downloadBackupFile(fileId, fileName) {
 }
 
 /**
- * Khôi phục dữ liệu từ 1 file backup (.gz) chọn từ máy admin — dùng
+ * Khôi phục dữ liệu từ 1 file backup (.bak) chọn từ máy admin — dùng
  * XMLHttpRequest (không phải apiRequest/fetch) vì cần theo dõi % tải lên
  * THẬT qua xhr.upload.onprogress (fetch không hỗ trợ progress upload).
  *
  * Có 2 giai đoạn tách biệt, callback onPhaseChange báo hiệu chuyển pha:
  * - 'uploading': đang gửi file lên server — có % thật.
- * - 'processing': file đã gửi xong, server đang chạy mongorestore --drop —
+ * - 'processing': file đã gửi xong, server đang chạy RESTORE DATABASE —
  *   KHÔNG có tín hiệu tiến trình nào từ backend (chạy đồng bộ, không dùng
  *   WebSocket/SSE), nên không thể hiện % thật ở bước này.
  *
@@ -205,7 +205,7 @@ export async function downloadBackupFile(fileId, fileName) {
  * LƯU Ý: cancel() chỉ thực sự "huỷ" được nếu đang ở giai đoạn 'uploading'
  * (server chưa nhận đủ file, chưa bắt đầu restore). Nếu đã sang giai đoạn
  * 'processing', gọi cancel() chỉ dừng việc CLIENT chờ phản hồi — tiến trình
- * mongorestore ở server vẫn tiếp tục chạy độc lập, không có cách nào dừng
+ * RESTORE ở server vẫn tiếp tục chạy độc lập, không có cách nào dừng
  * nó từ phía trình duyệt.
  */
 export function restoreBackupFile(file, { onUploadProgress, onPhaseChange } = {}) {
@@ -230,7 +230,7 @@ export function restoreBackupFile(file, { onUploadProgress, onPhaseChange } = {}
         onUploadProgress(Math.round((e.loaded / e.total) * 100));
       }
     };
-    // Toàn bộ file đã rời trình duyệt -> server bắt đầu xử lý (mongorestore).
+    // Toàn bộ file đã rời trình duyệt -> server bắt đầu xử lý (RESTORE DATABASE).
     // Từ đây KHÔNG còn ý nghĩa "huỷ an toàn" nữa.
     xhr.upload.onload = () => {
       onPhaseChange?.('processing');

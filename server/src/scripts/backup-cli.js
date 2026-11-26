@@ -1,6 +1,6 @@
 /**
  * CLI backup thủ công — npm run backup
- * Dump MongoDB (mongodump --gzip) -> upload lên Google Drive -> xoay vòng giữ tối đa 5 bản.
+ * BACKUP DATABASE (.bak) -> mã hóa -> upload lên Google Drive -> xoay vòng giữ tối đa 5 bản.
  * Dùng chung logic với POST /api/backups (backup.controller.js).
  */
 import 'dotenv/config';

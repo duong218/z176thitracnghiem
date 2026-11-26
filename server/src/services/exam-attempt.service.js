@@ -353,7 +353,7 @@ async function checkAndAutoSubmitIfInactive(attempt, userId) {
 async function buildRoleInfo(employee, exam, examCandidate, examCode) {
   const options = await getEmployeeRoleOptions(employee, exam);
   const eligibleOptions = options.filter((o) => o.eligible);
-  const currentKey = examCode?.department_id || examCode?.departmentId ? String(examCode.department_id || examCode.departmentId) : null;
+  const currentKey = examCode?.departmentId ? String(examCode.departmentId) : null;
   const current = options.find((o) => String(o.departmentId) === currentKey) ?? eligibleOptions[0] ?? options[0] ?? null;
 
   let hasDepartmentQuestions = true;
@@ -421,7 +421,7 @@ export const examAttemptService = {
     }
 
     const codeId = examCandidate.examCodeId || examCandidate.exam_code_id;
-    const codeRes = await query('SELECT code, department_id FROM exam_codes WHERE id = @id', { id: codeId });
+    const codeRes = await query('SELECT id, code, department_id FROM exam_codes WHERE id = @id', { id: codeId });
     const examCode = mapRow(codeRes.recordset[0]);
     const role = await buildRoleInfo(employee, exam, examCandidate, examCode);
 
@@ -570,7 +570,7 @@ export const examAttemptService = {
       } else {
         const codeRes = await query('SELECT department_id FROM exam_codes WHERE id = @id', { id: candExamCodeId });
         const currentCode = mapRow(codeRes.recordset[0]);
-        const target = departmentId ?? currentCode?.department_id ?? eligibleOptions[0].departmentId;
+        const target = departmentId ?? currentCode?.departmentId ?? eligibleOptions[0].departmentId;
         await assignCandidateRole({ exam, examCandidate, employee, departmentId: target });
         await query(
           `UPDATE exam_candidates SET role_chosen_by = '${ROLE_CHOSEN_BY.CANDIDATE}', role_confirmed_at = SYSUTCDATETIME() WHERE id = @id`,
@@ -580,7 +580,7 @@ export const examAttemptService = {
     } else if (departmentId) {
       const lockedRes = await query('SELECT department_id FROM exam_codes WHERE id = @id', { id: candExamCodeId });
       const lockedCode = mapRow(lockedRes.recordset[0]);
-      if (lockedCode && String(lockedCode.department_id) !== String(departmentId)) {
+      if (lockedCode && String(lockedCode.departmentId) !== String(departmentId)) {
         throw new ApiError(409, 'Vai trò thi đã được khóa cho kỳ thi này.', 'ROLE_LOCKED');
       }
     }
@@ -738,7 +738,7 @@ export const examAttemptService = {
 
     return {
       examCandidateId: String(examCandidate.id),
-      currentDepartmentId: examCode?.department_id ? String(examCode.department_id) : null,
+      currentDepartmentId: examCode?.departmentId ? String(examCode.departmentId) : null,
       allowCommonCompensation: isCommonCompensationEnabled(exam),
       hasInProgress,
       options: options.map((o) => ({
@@ -773,7 +773,7 @@ export const examAttemptService = {
     let roleChanged = false;
     let roleName = null;
     if (departmentId) {
-      const empRes = await query('SELECT * FROM employees WHERE id = @id', { id: examCandidate.emp_id });
+      const empRes = await query('SELECT * FROM employees WHERE id = @id', { id: examCandidate.empId });
       const employee = mapRow(empRes.recordset[0]);
 
       const inProg = await query(
@@ -804,10 +804,10 @@ export const examAttemptService = {
 
     return {
       examCandidateId: String(examCandidate.id),
-      employeeName: examCandidate.employee_fullname ?? null,
+      employeeName: examCandidate.employeeFullname ?? null,
       examId: String(exam.id),
       examTitle: exam.title,
-      extraAttemptsGranted: granted.extra_attempts_granted,
+      extraAttemptsGranted: granted.extraAttemptsGranted,
       maxAttempts: resolveMaxAttempts(granted),
       roleChanged,
       roleName,

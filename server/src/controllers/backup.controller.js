@@ -1,6 +1,6 @@
 /**
  * Controller Quản lý Sao lưu & Khôi phục Cơ sở Dữ liệu (Database Backup & Restore).
- * Tích hợp lưu trữ trực tiếp lên Google Drive, tải file sao lưu .gz và khôi phục CSDL an toàn.
+ * Tích hợp lưu trữ trực tiếp lên Google Drive, tải file sao lưu .bak và khôi phục CSDL an toàn.
  */
 
 import { backupService } from '../services/backup.service.js';
@@ -42,13 +42,13 @@ export const listBackups = asyncHandler(async (req, res) => {
   });
 });
 
-// Tải xuống file nén .gz của một bản sao lưu cụ thể từ Google Drive
+// Tải xuống file .bak của một bản sao lưu cụ thể từ Google Drive
 export const downloadBackup = asyncHandler(async (req, res) => {
   const { fileId } = req.params;
   const { fileName } = req.query;
 
-  res.setHeader('Content-Disposition', `attachment; filename="${fileName || 'backup.gz'}"`);
-  res.setHeader('Content-Type', 'application/octet-stream'); // bản mới là .gz.enc (đã mã hóa), không phải gzip thuần
+  res.setHeader('Content-Disposition', `attachment; filename="${fileName || 'backup.bak'}"`);
+  res.setHeader('Content-Type', 'application/octet-stream'); // bản mới là .bak.enc (đã mã hóa), không phải .bak thuần
 
   await backupService.streamDriveFileToResponse(fileId, res);
 
@@ -61,10 +61,10 @@ export const downloadBackup = asyncHandler(async (req, res) => {
   });
 });
 
-// Khôi phục CSDL từ file .gz tải lên (bắt buộc xác nhận chuỗi 'RESTORE' để tránh ghi đè nhầm)
+// Khôi phục CSDL từ file .bak tải lên (bắt buộc xác nhận chuỗi 'RESTORE' để tránh ghi đè nhầm)
 export const restoreBackup = asyncHandler(async (req, res) => {
   if (!req.file) {
-    throw new ApiError(400, 'Vui lòng chọn file backup (.gz) để khôi phục.', 'NO_FILE');
+    throw new ApiError(400, 'Vui lòng chọn file backup (.bak) để khôi phục.', 'NO_FILE');
   }
 
   if (req.body?.confirm !== 'RESTORE') {

@@ -490,7 +490,7 @@ export async function updateUserProfile({ userId, profile }) {
           phone: phone ?? '',
           address: address ?? '',
           position: position ?? '',
-          isActive: user.role_code === 'candidate' ? 1 : 0,
+          isActive: user.roleCode === 'candidate' ? 1 : 0,
         }
       );
       employee = { id: ins.recordset[0].id };

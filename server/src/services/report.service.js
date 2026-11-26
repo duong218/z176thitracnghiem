@@ -583,8 +583,8 @@ export const reportService = {
     return {
       employee: {
         fullname: employee.fullname,
-        employeeCode: employee.employee_code || null,
-        departmentName: employee.department_name || null,
+        employeeCode: employee.employeeCode || null,
+        departmentName: employee.departmentName || null,
         extraDepartments: extraRes.recordset.map((d) => ({ _id: String(d._id), name: d.name })),
       },
       results,

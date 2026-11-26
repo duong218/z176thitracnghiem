@@ -10,7 +10,7 @@ const PHASE_LABEL = {
 };
 
 // Thẻ tiến độ nổi góc dưới phải, hiện ở MỌI mục của dashboard quản trị (đổi tab không mất).
-// Pha "dump" (mongodump) không báo % thật nên hiện thanh chạy thay vì số.
+// Pha "dump" (BACKUP DATABASE) không báo % thật nên hiện thanh chạy thay vì số.
 export const BackupProgressCard = () => {
   const { state, phase, percent, message, result } = useBackupJob();
   useEffect(() => {

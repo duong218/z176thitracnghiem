@@ -2,7 +2,7 @@
  * Service Phân tích: (1) chất lượng câu hỏi thi chính thức, (2) bản đồ năng lực theo chủ đề.
  * Chỉ ĐỌC dữ liệu sẵn có (CandidateAnswer, Result, ExamAttempt, PracticeSession...), không đổi schema.
  * Các hàm tính toán (computeQuestionStats, tallyByTopic, buildTopicCompetency, pickWeakest, detectAnomalies, buildPracticeReadiness)
- * là hàm thuần để test được không cần DB — xem server/test/test-analytics.mjs.
+ * là hàm thuần để test được không cần DB.
  */
 
 import { query as rawQuery } from '../db/sql-helpers.js';
