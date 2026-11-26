@@ -41,9 +41,6 @@ export const env = {
       process.env.SQL_TRUST_CERT === 'true',
   },
 
-  // Thư mục chứa file .bak mà CẢ tiến trình Node và dịch vụ SQL Server cùng đọc/ghi được (để trống = thư mục tạm của Node)
-  sqlBackupDir: optional('SQL_BACKUP_DIR'),
-
   // Cấu hình xác thực JWT & mã hóa mật khẩu
   jwtSecret: optional('JWT_SECRET'),
   jwtRefreshSecret: optional('JWT_REFRESH_SECRET'),
@@ -84,6 +81,9 @@ export const env = {
 
   // Khóa mã hóa bản sao lưu (AES-256-GCM) trước khi đưa lên Google Drive. Bắt buộc ở production.
   backupEncryptionKey: optional('BACKUP_ENCRYPTION_KEY'),
+
+  // Thư mục chứa file .bak/.bak.enc: SQL Server (tài khoản dịch vụ) VÀ Node đều phải đọc/ghi được. Trống = thư mục tạm của hệ điều hành.
+  backupSqlDir: optional('BACKUP_SQL_DIR'),
 
   // Cấu hình sao lưu dữ liệu lên Google Drive (OAuth2)
   googleBackup: {

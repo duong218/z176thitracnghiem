@@ -12,15 +12,42 @@ import fssync from 'fs';
 import { google } from 'googleapis';
 import { env } from '../config/env.js';
 import { ApiError } from '../utils/api-error.js';
-import { sql, sqlPool, closeSqlPool, openAdminPool, setDbMaintenance } from '../db/sql-server.js';
+import { sql, sqlPool, closeSqlPool } from '../db/sql-server.js';
 
 const MAX_BACKUPS_KEPT = 5;
-const TMP_DIR = env.sqlBackupDir ?? path.join(os.tmpdir(), 'z176-backups');
+const TMP_DIR = env.backupSqlDir ? path.resolve(env.backupSqlDir) : path.join(os.tmpdir(), 'z176-backups');
+
+// Biến lỗi thô (mssql / Google / fs) thành ApiError có tên bước + lỗi gốc + gợi ý, để web hiện đúng nguyên nhân.
+function explain(err, label) {
+  if (err instanceof ApiError) return err;
+  // mssql: nguyên nhân thật (vd lỗi 3201 "Operating system error 5") nằm trong precedingErrors, err.message chỉ là câu tổng kết
+  const raw = [...(err?.precedingErrors ?? []).map((e) => e.message), err?.message ?? String(err)].join(' ');
+  let hint = '';
+  if (/Operating system error 5|Access is denied|EACCES|EPERM/i.test(raw)) {
+    hint = ` Gợi ý: tài khoản dịch vụ SQL Server hoặc Node chưa có quyền với thư mục "${TMP_DIR}". Tạo thư mục riêng, cấp quyền Modify cho tài khoản dịch vụ SQL rồi đặt BACKUP_SQL_DIR trong .env.`;
+  } else if (/Operating system error 3|cannot open backup device|ENOENT/i.test(raw)) {
+    hint = ` Gợi ý: không thấy file/thư mục "${TMP_DIR}" (SQL Server và Node phải thấy cùng đường dẫn này).`;
+  } else if (/Exclusive access could not be obtained/i.test(raw)) {
+    hint = ' Gợi ý: còn kết nối khác đang dùng database, hãy thử lại sau ít giây.';
+  } else if (/invalid_grant/i.test(raw)) {
+    hint = ' Gợi ý: GOOGLE_REFRESH_TOKEN đã hết hạn hoặc bị thu hồi, chạy "node src/scripts/get-google-refresh-token.js" để lấy mã mới.';
+  }
+  console.error(`[backup] ${label} thất bại:`, err);
+  const dot = /[.!?]$/.test(raw) ? '' : '.';
+  return new ApiError(500, `${label} thất bại: ${raw}${dot}${hint}`, 'BACKUP_STEP_FAILED');
+}
+
+async function step(label, fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    throw explain(err, label);
+  }
+}
 
 // Đảm bảo thư mục lưu file .bak tạm tồn tại trên server
 async function ensureTmpDir() {
-  // Thư mục tạm riêng: chỉ tiến trình server đọc được. SQL_BACKUP_DIR: không ép quyền vì SQL Server cũng phải đọc/ghi
-  await fs.mkdir(TMP_DIR, { recursive: true, ...(env.sqlBackupDir ? {} : { mode: 0o700 }) });
+  await fs.mkdir(TMP_DIR, { recursive: true, mode: 0o700 }); // chỉ tiến trình server đọc được bản dump chưa mã hóa
 }
 
 // Kiểm tra đầy đủ thông tin xác thực Google OAuth2 trong biến môi trường
@@ -137,14 +164,10 @@ async function dumpToLocalFile(prefix = 'z176-backup') {
   const filePath = path.join(TMP_DIR, fileName);
 
   const dbName = env.sqlServer.database.replace(/]/g, ']]');
-  const pool = await openAdminPool();
-  try {
-    await pool.request().input('bakPath', sql.NVarChar(1000), filePath).query(
-      `BACKUP DATABASE [${dbName}] TO DISK = @bakPath WITH FORMAT, INIT, NAME = N'Z176 Full Backup'`
-    );
-  } finally {
-    await pool.close().catch(() => {});
-  }
+  const pool = await sqlPool();
+  await pool.request().input('bakPath', sql.NVarChar(1000), filePath).query(
+    `BACKUP DATABASE [${dbName}] TO DISK = @bakPath WITH FORMAT, INIT, NAME = N'Z176 Full Backup'`
+  );
 
   const stat = await fs.stat(filePath);
   return { filePath, fileName, size: stat.size };
@@ -189,15 +212,15 @@ async function createBackupToDrive({ prefix = 'z176-backup', onProgress } = {}) 
     onProgress?.(phase, Math.min(100, Math.round(from + (span * done) / Math.max(total, 1))));
 
   onProgress?.('dump', 0);
-  const { filePath, fileName, size } = await dumpToLocalFile(prefix);
+  const { filePath, fileName, size } = await step('Tạo file .bak (BACKUP DATABASE)', () => dumpToLocalFile(prefix));
   const encPath = `${filePath}.enc`;
   try {
-    if (encrypt) await encryptFile(filePath, encPath, (done) => report('encrypt', 30, 20, done, size));
+    if (encrypt) await step('Mã hóa bản sao lưu', () => encryptFile(filePath, encPath, (done) => report('encrypt', 30, 20, done, size)));
     const upFrom = encrypt ? 50 : 30;
     const upPath = encrypt ? encPath : filePath;
     const { size: upSize } = await fs.stat(upPath);
-    return await uploadToDrive(upPath, encrypt ? `${fileName}.enc` : fileName, (sent) =>
-      report('upload', upFrom, 100 - upFrom, sent, upSize)
+    return await step('Tải lên Google Drive', () =>
+      uploadToDrive(upPath, encrypt ? `${fileName}.enc` : fileName, (sent) => report('upload', upFrom, 100 - upFrom, sent, upSize))
     );
   } finally {
     await cleanupLocalFile(filePath);
@@ -226,7 +249,7 @@ function startBackupJob({ prefix = 'z176-manual', afterSuccess } = {}) {
         onProgress: (phase, percent) => Object.assign(mine, { phase, percent }),
       });
       mine.phase = 'rotate';
-      const { kept, deleted } = await rotateDriveBackups();
+      const { kept, deleted } = await step('Xoay vòng bản cũ trên Google Drive', () => rotateDriveBackups());
       try {
         await afterSuccess?.(file, { kept, deleted });
       } catch (err) {
@@ -253,12 +276,14 @@ function startBackupJob({ prefix = 'z176-manual', afterSuccess } = {}) {
 // Lấy danh sách các file backup đang lưu trên Google Drive (mới nhất xếp trước)
 async function listDriveBackups() {
   const drive = getDriveClient();
-  const res = await drive.files.list({
-    q: `'${env.googleBackup.folderId}' in parents and trashed = false`,
-    fields: 'files(id, name, size, createdTime)',
-    orderBy: 'createdTime desc',
-    pageSize: 100,
-  });
+  const res = await step('Đọc danh sách bản sao lưu trên Google Drive', () =>
+    drive.files.list({
+      q: `'${env.googleBackup.folderId}' in parents and trashed = false`,
+      fields: 'files(id, name, size, createdTime)',
+      orderBy: 'createdTime desc',
+      pageSize: 100,
+    })
+  );
   return res.data.files ?? [];
 }
 
@@ -293,51 +318,56 @@ async function downloadDriveFileToLocal(fileId, fileName) {
 // Stream trực tiếp dữ liệu file từ Google Drive ra HTTP response cho client tải về
 async function streamDriveFileToResponse(fileId, res) {
   const drive = getDriveClient();
-  const driveRes = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'stream' });
+  const driveRes = await step('Tải bản sao lưu từ Google Drive', () =>
+    drive.files.get({ fileId, alt: 'media' }, { responseType: 'stream' })
+  );
   driveRes.data.pipe(res);
 }
 
 // Khôi phục dữ liệu CSDL SQL Server từ file .bak / .bak.enc
 // Giải mã xong mới chạy RESTORE DATABASE: sai khóa thì dừng trước khi ghi đè, CSDL còn nguyên.
 async function restoreFromLocalFile(localFilePath) {
-  await ensureTmpDir();
-  // File SQL Server đọc phải nằm trong thư mục backup (đường dẫn upload có thể SQL Server không đọc được)
-  const archive = path.join(TMP_DIR, `restore-${Date.now()}.bak`);
+  const decPath = `${localFilePath}.dec`;
   let masterPool;
   try {
+    let archive = localFilePath;
     if (await isEncrypted(localFilePath)) {
-      await decryptFile(localFilePath, archive);
-    } else {
-      await fs.copyFile(localFilePath, archive);
+      await decryptFile(localFilePath, decPath);
+      archive = decPath;
     }
-    // SQL Server chạy tài khoản khác tiến trình Node nên cần quyền đọc file
-    if (env.sqlBackupDir) await fs.chmod(archive, 0o644);
 
     const dbName = env.sqlServer.database.replace(/]/g, ']]');
-    masterPool = await openAdminPool();
-    // Kiểm tra SQL Server đọc được file TRƯỚC khi ngắt kết nối người dùng
-    await masterPool.request().input('bakPath', sql.NVarChar(1000), archive).query(
-      'RESTORE VERIFYONLY FROM DISK = @bakPath'
+    await closeSqlPool();
+    masterPool = await step('Kết nối SQL Server (database master)', () =>
+      new sql.ConnectionPool({
+        server: env.sqlServer.host,
+        port: env.sqlServer.port,
+        database: 'master',
+        user: env.sqlServer.user,
+        password: env.sqlServer.password,
+        options: {
+          encrypt: env.sqlServer.encrypt,
+          trustServerCertificate: env.sqlServer.trustServerCertificate,
+        },
+      }).connect()
     );
 
-    setDbMaintenance(true);
-    await closeSqlPool();
+    await step('Chuyển database sang chế độ một người dùng', () =>
+      masterPool.request().query(`ALTER DATABASE [${dbName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE`)
+    );
     try {
-      // Gộp 1 batch để không kết nối nào chen vào giữa SINGLE_USER và RESTORE
-      await masterPool.request().input('bakPath', sql.NVarChar(1000), archive).query(
-        `ALTER DATABASE [${dbName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-         RESTORE DATABASE [${dbName}] FROM DISK = @bakPath WITH REPLACE;`
+      await step('RESTORE DATABASE', () =>
+        masterPool.request().input('bakPath', sql.NVarChar(1000), archive).query(
+          `RESTORE DATABASE [${dbName}] FROM DISK = @bakPath WITH REPLACE`
+        )
       );
     } finally {
-      await masterPool.request().query(`ALTER DATABASE [${dbName}] SET MULTI_USER`).catch((err) => {
-        console.error('[backup] Không đưa được CSDL về MULTI_USER:', err.message);
-      });
+      await masterPool.request().query(`ALTER DATABASE [${dbName}] SET MULTI_USER`).catch(() => {});
     }
   } finally {
-    setDbMaintenance(false);
     if (masterPool) await masterPool.close().catch(() => {});
     await sqlPool().catch(() => {});
-    await cleanupLocalFile(archive);
+    await cleanupLocalFile(decPath);
   }
 }
 
