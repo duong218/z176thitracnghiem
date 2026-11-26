@@ -20,7 +20,7 @@ import {
 } from '../models/constants.js';
 
 const MAX_OFFICIAL_ATTEMPTS = 1;
-const INACTIVITY_TIMEOUT_MS = 180_000;
+const INACTIVITY_TIMEOUT_MS = 60_000;
 const ABANDONED_ATTEMPT_WINDOW_MS = 2 * 60_000;
 const SUBMIT_GRACE_MS = 30_000; // nộp trễ hơn hạn quá mức này: chỉ chấm đáp án đã lưu
 const EXAM_REPLACED_MESSAGE =
@@ -573,7 +573,9 @@ export const examAttemptService = {
       } else {
         const codeRes = await query('SELECT department_id FROM exam_codes WHERE id = @id', { id: candExamCodeId });
         const currentCode = mapRow(codeRes.recordset[0]);
-        const target = departmentId ?? currentCode?.departmentId ?? eligibleOptions[0].departmentId;
+        // Phòng của mã đề hiện tại có thể đã bị gỡ khỏi hồ sơ / không còn hợp lệ -> dùng phòng hợp lệ đầu tiên
+        const codeDeptStillOk = eligibleOptions.some((o) => String(o.departmentId) === String(currentCode?.departmentId));
+        const target = departmentId ?? (codeDeptStillOk ? currentCode.departmentId : eligibleOptions[0].departmentId);
         await assignCandidateRole({ exam, examCandidate, employee, departmentId: target });
         await query(
           `UPDATE exam_candidates SET role_chosen_by = '${ROLE_CHOSEN_BY.CANDIDATE}', role_confirmed_at = SYSUTCDATETIME() WHERE id = @id`,
