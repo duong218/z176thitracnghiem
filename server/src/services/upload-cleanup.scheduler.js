@@ -32,10 +32,11 @@ async function runUploadCleanup() {
   // Tài liệu ôn tập còn hiệu lực cũng nằm trong thư mục này: tuyệt đối không xoá
   let keep = new Set();
   try {
-    const docRows = await query('SELECT file_path FROM study_documents WHERE is_active = 1');
+    const { recordset: docRows } = await query('SELECT file_path FROM study_documents WHERE is_active = 1');
     keep = new Set(docRows.map((d) => path.resolve(d.file_path)));
   } catch (err) {
-    console.error('[upload-cleanup] Không truy vấn được danh sách study_documents:', err.message);
+    console.error('[upload-cleanup] Không truy vấn được danh sách study_documents, bỏ qua lượt dọn:', err.message);
+    return; // không biết file nào cần giữ thì không xoá gì
   }
 
   const now = Date.now();

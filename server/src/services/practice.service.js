@@ -196,7 +196,7 @@ export async function startPractice(userId, rawOptions) {
     const orderedOpts = orderedByQuestion.get(qk);
     for (let oIdx = 0; oIdx < orderedOpts.length; oIdx++) {
       await query(
-        `INSERT INTO practice_question_options (practice_question_id, answer_id, sort_order)
+        `INSERT INTO practice_question_options (practice_question_id, answer_id, order_index)
          VALUES (@pqId, @ansId, @sortOrder)`,
         { pqId, ansId: orderedOpts[oIdx].id, sortOrder: oIdx }
       );
@@ -215,7 +215,7 @@ export async function startPractice(userId, rawOptions) {
     sessionId: String(session.id),
     mode: session.mode,
     availableCount: questions.length,
-    timeLimitSec: session.time_limit_sec,
+    timeLimitSec: session.timeLimitSec,
     questions: questions.map((q) => ({
       id: String(q.id),
       content: q.content,
@@ -268,7 +268,7 @@ export async function checkPracticeAnswer(userId, sessionId, questionId, selecte
 
   await query(
     `UPDATE practice_questions
-     SET is_correct = @isCorrect, checked = 1, updated_at = SYSUTCDATETIME()
+     SET is_correct = @isCorrect, checked = 1
      WHERE id = @pqId AND checked = 0`,
     { isCorrect: isCorrect ? 1 : 0, pqId: item.id }
   );
@@ -349,7 +349,7 @@ export async function submitPractice(userId, sessionId, answers = []) {
     if (isCorrect) correctCount += 1;
 
     await query(
-      'UPDATE practice_questions SET is_correct = @isCorrect, checked = 1, updated_at = SYSUTCDATETIME() WHERE id = @pqId',
+      'UPDATE practice_questions SET is_correct = @isCorrect, checked = 1 WHERE id = @pqId',
       { isCorrect: isCorrect ? 1 : 0, pqId: item.id }
     );
   }
@@ -425,7 +425,7 @@ export async function getActivePractice(userId) {
        FROM practice_question_options pqo
        JOIN answers a ON pqo.answer_id = a.id
        WHERE pqo.practice_question_id = @pqId
-       ORDER BY pqo.sort_order ASC`,
+       ORDER BY pqo.order_index ASC`,
       { pqId: item.pq_id }
     );
     clientQuestions.push({
@@ -440,8 +440,8 @@ export async function getActivePractice(userId) {
   return {
     sessionId: String(session.id),
     mode: session.mode,
-    timeLimitSec: session.time_limit_sec,
-    startedAt: session.started_at,
+    timeLimitSec: session.timeLimitSec,
+    startedAt: session.startedAt,
     questions: clientQuestions,
     selected,
     checked,

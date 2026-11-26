@@ -23,7 +23,7 @@ async function main() {
   // Mã nhân viên rác được sinh tự động có dạng "TMP" + số thứ tự dòng Excel,
   // vd TMP7, TMP8... — khớp không phân biệt hoa/thường để chắc chắn không
   // sót nếu có biến thể chữ thường.
-  const junkEmployees = await query(`
+  const { recordset: junkEmployees } = await query(`
     SELECT e.id, e.employee_code, e.user_id, e.fullname
     FROM employees e
     WHERE e.employee_code LIKE 'TMP%'
@@ -39,7 +39,7 @@ async function main() {
   const userIds = junkEmployees.map((e) => e.user_id).filter(Boolean);
   let usernameById = new Map();
   if (userIds.length > 0) {
-    const users = await query(`
+    const { recordset: users } = await query(`
       SELECT id, username FROM users
       WHERE id IN (${userIds.map((_, i) => `@uid${i}`).join(',')})
     `, Object.fromEntries(userIds.map((id, i) => [`uid${i}`, id])));
@@ -66,7 +66,7 @@ async function main() {
   let userDeleteCount = 0;
 
   for (const empId of empIds) {
-    await withTransaction(async ({ query: txQ }) => {
+    await withTransaction(async (txQ) => {
       await txQ('DELETE FROM employee_extra_departments WHERE employee_id = @empId', { empId });
       await txQ('DELETE FROM employees WHERE id = @empId', { empId });
       empDeleteCount++;

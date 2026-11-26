@@ -16,7 +16,7 @@ const REFRESH_COOKIE = 'refreshToken';
 async function buildUserPayload(user, role) {
   // Lỗi khi tra hồ sơ không được làm hỏng đăng nhập/refresh/me: trả chuỗi rỗng, client tự dùng username.
   const { recordset: [emp] = [] } = await query(
-    'SELECT fullname, employeeCode FROM employees WHERE user_id = @id',
+    'SELECT fullname, employee_code AS employeeCode FROM employees WHERE user_id = @id',
     { id: user.id },
   ).catch(() => []);
   return {
@@ -115,7 +115,7 @@ async function registerFailedLogin(user) {
   await query(
     `UPDATE users SET
        lock_until = CASE WHEN failed_login_attempts + 1 >= @max THEN @until ELSE lock_until END,
-       failed_login_attempts = CASE WHEN failedLoginAttempts + 1 >= @max THEN 0 ELSE failedLoginAttempts + 1 END,
+       failed_login_attempts = CASE WHEN failed_login_attempts + 1 >= @max THEN 0 ELSE failedLoginAttempts + 1 END,
        updated_at = SYSUTCDATETIME()
      WHERE id = @id`,
     {

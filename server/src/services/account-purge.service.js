@@ -18,13 +18,13 @@ function lockedBeforeThreshold(now = new Date()) {
 // Kiểm tra tài khoản có dấu vết lịch sử quan trọng cần giữ lại hay không (kỳ thi, nhật ký kiểm toán)
 async function hasHistoricalFootprint(userId, employeeId) {
   if (employeeId) {
-    const examCandidateCount = await query(
+    const { recordset: examCandidateCount } = await query(
       'SELECT COUNT(*) as cnt FROM exam_candidates WHERE employee_id = @employeeId',
       { employeeId }
     );
     if (examCandidateCount[0]?.cnt > 0) return true;
   }
-  const auditCount = await query(
+  const { recordset: auditCount } = await query(
     'SELECT COUNT(*) as cnt FROM audit_logs WHERE actor_user_id = @userId',
     { userId }
   );
@@ -36,7 +36,7 @@ async function hasHistoricalFootprint(userId, employeeId) {
 export async function purgeExpiredLockedAccounts() {
   const threshold = lockedBeforeThreshold();
 
-  const candidates = await query(`
+  const { recordset: candidates } = await query(`
     SELECT u.id, u.username, e.id as employee_id
     FROM users u
     LEFT JOIN employees e ON e.user_id = u.id
@@ -58,11 +58,22 @@ export async function purgeExpiredLockedAccounts() {
       continue;
     }
 
-    await withTransaction(async ({ query: txQuery }) => {
+    await withTransaction(async (txQuery) => {
       if (employeeId) {
         await txQuery('DELETE FROM employee_extra_departments WHERE employee_id = @employeeId', { employeeId });
         await txQuery('DELETE FROM employees WHERE id = @employeeId', { employeeId });
       }
+      // Dữ liệu cá nhân còn khóa ngoại tới users phải xóa trước
+      const sessions = 'SELECT id FROM practice_sessions WHERE user_id = @userId';
+      const items = `SELECT id FROM practice_questions WHERE practice_session_id IN (${sessions})`;
+      for (const table of ['practice_question_options', 'practice_question_correct_answers', 'practice_question_selected_answers']) {
+        await txQuery(`DELETE FROM ${table} WHERE practice_question_id IN (${items})`, { userId });
+      }
+      for (const table of ['practice_questions', 'practice_session_topics']) {
+        await txQuery(`DELETE FROM ${table} WHERE practice_session_id IN (${sessions})`, { userId });
+      }
+      await txQuery('DELETE FROM practice_sessions WHERE user_id = @userId', { userId });
+      await txQuery('DELETE FROM notifications WHERE recipient_user_id = @userId', { userId });
       await txQuery('DELETE FROM users WHERE id = @userId', { userId });
     });
 

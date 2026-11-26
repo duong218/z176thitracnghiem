@@ -77,16 +77,30 @@ export function findDuplicateGroups(attempts, resultAttemptIds) {
 
 const fmt = (d) => (d ? new Date(d).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : '-');
 
+// Thông tin thí sinh + kỳ thi để in ra màn hình
+async function loadCandidates(ids) {
+  const params = Object.fromEntries(ids.map((id, i) => [`id${i}`, id]));
+  const { recordset } = await query(
+    `SELECT ec.id, ec.extra_attempts_granted AS extraAttemptsGranted, e.fullname, e.employee_code AS employeeCode, x.title
+       FROM exam_candidates ec
+       JOIN employees e ON e.id = ec.employee_id
+       JOIN exams x ON x.id = ec.exam_id
+      WHERE ec.id IN (${Object.keys(params).map((k) => `@${k}`).join(',')})`,
+    params,
+  );
+  return recordset;
+}
+
 async function main() {
   await sqlPool();
   console.log(`Đã kết nối SQL Server. Chế độ: ${CONFIRM ? 'XÓA THẬT (--confirm)' : 'DRY-RUN (không xóa gì)'}\n`);
 
-  const attempts = await query(`
+  const { recordset: attempts } = await query(`
     SELECT id as _id, exam_candidate_id as examCandidateId, started_at as startedAt, submitted_at as submittedAt, status
     FROM exam_attempts
     WHERE attempt_type = 'official'
   `);
-  const results = await query(`
+  const { recordset: results } = await query(`
     SELECT exam_attempt_id as examAttemptId, score, passed
     FROM results
   `);
@@ -97,18 +111,14 @@ async function main() {
   if (groups.length === 0) {
     console.log('Không có lượt thi trùng nào cần dọn.');
   } else {
-    const candidates = await ExamCandidate.find({ _id: { $in: groups.map((g) => g.examCandidateId) } })
-      .populate('employeeId', 'fullname employeeCode')
-      .populate('examId', 'title')
-      .lean();
-    const candById = new Map(candidates.map((c) => [String(c._id), c]));
+    const candById = new Map((await loadCandidates(groups.map((g) => g.examCandidateId))).map((c) => [String(c.id), c]));
 
     console.log(`Tìm thấy ${groups.length} lần ngồi thi bị tạo đôi:\n`);
     for (const g of groups) {
       const c = candById.get(g.examCandidateId);
-      const name = c?.employeeId?.fullname ?? '(không rõ)';
-      const code = c?.employeeId?.employeeCode ?? '';
-      console.log(`• ${name} ${code ? `(${code})` : ''} — kỳ thi: ${c?.examId?.title ?? '(không rõ)'}`);
+      const name = c?.fullname ?? '(không rõ)';
+      const code = c?.employeeCode ?? '';
+      console.log(`• ${name} ${code ? `(${code})` : ''} — kỳ thi: ${c?.title ?? '(không rõ)'}`);
       const describe = (a) => {
         const r = resultByAttempt.get(String(a._id));
         return `${a._id} | bắt đầu ${fmt(a.startedAt)} | ${a.status} | ${r ? `điểm ${r.score}` : 'chưa có kết quả'}`;
@@ -125,13 +135,20 @@ async function main() {
 
     if (CONFIRM) {
       const removeIds = groups.flatMap((g) => g.remove.map((a) => a._id));
-      const r1 = await Result.deleteMany({ examAttemptId: { $in: removeIds } });
-      const r2 = await CandidateAnswer.deleteMany({ examAttemptId: { $in: removeIds } });
-      const r3 = await AttemptQuestion.deleteMany({ examAttemptId: { $in: removeIds } });
-      const r4 = await ExamAttempt.deleteMany({ _id: { $in: removeIds } });
-      console.log(
-        `\nĐã xóa: ${r4.deletedCount} lượt thi, ${r1.deletedCount} kết quả, ${r2.deletedCount} đáp án, ${r3.deletedCount} câu hỏi snapshot.`,
-      );
+      // Xóa bảng con trước, tất cả trong 1 transaction
+      await withTransaction(async (txQuery) => {
+        for (const attemptId of removeIds) {
+          for (const sql of [
+            'DELETE FROM results WHERE exam_attempt_id = @attemptId',
+            'DELETE FROM candidate_answer_selections WHERE candidate_answer_id IN (SELECT id FROM candidate_answers WHERE exam_attempt_id = @attemptId)',
+            'DELETE FROM candidate_answers WHERE exam_attempt_id = @attemptId',
+            'DELETE FROM attempt_question_answers WHERE attempt_question_id IN (SELECT id FROM attempt_questions WHERE exam_attempt_id = @attemptId)',
+            'DELETE FROM attempt_questions WHERE exam_attempt_id = @attemptId',
+            'DELETE FROM exam_attempts WHERE id = @attemptId',
+          ]) await txQuery(sql, { attemptId });
+        }
+      });
+      console.log(`\nĐã xóa ${removeIds.length} lượt thi thừa (kèm kết quả/đáp án).`);
     } else {
       const n = groups.reduce((s, g) => s + g.remove.length, 0);
       console.log(`\n[DRY-RUN] Sẽ xóa ${n} lượt thi thừa (kèm kết quả/đáp án của chúng). Chạy lại với --confirm để xóa thật.`);
@@ -142,18 +159,16 @@ async function main() {
   if (groups.length > 0) {
     const removedSet = new Set(groups.flatMap((g) => g.remove.map((a) => String(a._id))));
     const affectedIds = [...new Set(groups.map((g) => g.examCandidateId))];
-    const cands = await ExamCandidate.find({ _id: { $in: affectedIds } })
-      .populate('employeeId', 'fullname')
-      .lean();
+    const cands = await loadCandidates(affectedIds);
     console.log('\nSố lượt thi sau khi dọn (để bạn cấp thêm nếu cần):');
     for (const c of cands) {
       const used = attempts.filter(
         (a) =>
-          String(a.examCandidateId) === String(c._id) && a.status !== 'in_progress' && !removedSet.has(String(a._id)),
+          String(a.examCandidateId) === String(c.id) && a.status !== 'in_progress' && !removedSet.has(String(a._id)),
       ).length;
       const max = MAX_OFFICIAL_ATTEMPTS + (c.extraAttemptsGranted ?? 0);
       console.log(
-        `  - ${c.employeeId?.fullname ?? c._id}: đã dùng ${used}, tối đa ${max} (đã cấp thêm ${c.extraAttemptsGranted ?? 0}) -> còn ${Math.max(0, max - used)} lượt`,
+        `  - ${c.fullname ?? c.id}: đã dùng ${used}, tối đa ${max} (đã cấp thêm ${c.extraAttemptsGranted ?? 0}) -> còn ${Math.max(0, max - used)} lượt`,
       );
     }
   }
@@ -170,13 +185,6 @@ async function main() {
   if (stuck.length > 0) {
     console.log(`\n⚠ Còn ${stuck.length} thí sinh có >1 lượt ĐANG DỞ (không tự dọn được, cần xử lý tay trước khi tạo chỉ mục):`);
     for (const [candId, n] of stuck) console.log(`  - examCandidateId=${candId}: ${n} lượt đang dở`);
-  } else if (CONFIRM) {
-    try {
-      await ExamAttempt.createIndexes();
-      console.log('\nĐã tạo/xác nhận chỉ mục duy nhất cho lượt thi đang dở.');
-    } catch (err) {
-      console.error('\nKhông tạo được chỉ mục:', err.message);
-    }
   }
 
   await closeSqlPool();

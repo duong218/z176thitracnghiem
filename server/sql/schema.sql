@@ -10,7 +10,7 @@ IF OBJECT_ID('roles', 'U') IS NULL CREATE TABLE roles (
 );
 IF OBJECT_ID('departments', 'U') IS NULL CREATE TABLE departments (
   id UNIQUEIDENTIFIER NOT NULL DEFAULT NEWSEQUENTIALID() PRIMARY KEY,
-  name NVARCHAR(255) NOT NULL UNIQUE, slug NVARCHAR(255) NULL UNIQUE, code NVARCHAR(64) NULL UNIQUE,
+  name NVARCHAR(255) NOT NULL UNIQUE, slug NVARCHAR(255) NULL, code NVARCHAR(64) NULL,
   description NVARCHAR(MAX) NOT NULL DEFAULT '', is_active BIT NOT NULL DEFAULT 1,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
@@ -25,7 +25,7 @@ IF OBJECT_ID('users', 'U') IS NULL CREATE TABLE users (
 IF OBJECT_ID('employees', 'U') IS NULL CREATE TABLE employees (
   id UNIQUEIDENTIFIER NOT NULL DEFAULT NEWSEQUENTIALID() PRIMARY KEY,
   user_id UNIQUEIDENTIFIER NOT NULL UNIQUE REFERENCES users(id), department_id UNIQUEIDENTIFIER NOT NULL REFERENCES departments(id),
-  fullname NVARCHAR(255) NOT NULL, employee_code NVARCHAR(128) NULL UNIQUE,
+  fullname NVARCHAR(255) NOT NULL, employee_code NVARCHAR(128) NULL,
   dob NVARCHAR(64) NOT NULL DEFAULT '', gender NVARCHAR(64) NOT NULL DEFAULT '', phone NVARCHAR(64) NOT NULL DEFAULT '',
   address NVARCHAR(MAX) NOT NULL DEFAULT '', position NVARCHAR(255) NOT NULL DEFAULT '', is_active BIT NOT NULL DEFAULT 1,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
@@ -52,13 +52,15 @@ IF OBJECT_ID('questions', 'U') IS NULL CREATE TABLE questions (
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   CONSTRAINT CK_questions_scope_department CHECK ((scope = 'Common' AND department_id IS NULL) OR (scope = 'DepartmentSpecific' AND department_id IS NOT NULL))
 );
-CREATE INDEX IX_questions_lookup ON questions(topic_id, scope, department_id, is_active);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_questions_lookup' AND object_id = OBJECT_ID('questions'))
+  CREATE INDEX IX_questions_lookup ON questions(topic_id, scope, department_id, is_active);
 IF OBJECT_ID('answers', 'U') IS NULL CREATE TABLE answers (
   id UNIQUEIDENTIFIER NOT NULL DEFAULT NEWSEQUENTIALID() PRIMARY KEY, question_id UNIQUEIDENTIFIER NOT NULL REFERENCES questions(id),
   content NVARCHAR(MAX) NOT NULL, is_correct BIT NOT NULL DEFAULT 0, sort_order INT NOT NULL DEFAULT 0,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
-CREATE INDEX IX_answers_question_order ON answers(question_id, sort_order);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_answers_question_order' AND object_id = OBJECT_ID('answers'))
+  CREATE INDEX IX_answers_question_order ON answers(question_id, sort_order);
 IF OBJECT_ID('exams', 'U') IS NULL CREATE TABLE exams (
   id UNIQUEIDENTIFIER NOT NULL DEFAULT NEWSEQUENTIALID() PRIMARY KEY, title NVARCHAR(500) NOT NULL,
   topic_id UNIQUEIDENTIFIER NOT NULL REFERENCES topics(id), start_date DATETIME2 NULL, end_date DATETIME2 NULL,
@@ -73,7 +75,8 @@ IF OBJECT_ID('exams', 'U') IS NULL CREATE TABLE exams (
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   CONSTRAINT CK_exam_counts CHECK (total_questions = common_question_count + department_question_count)
 );
-CREATE UNIQUE INDEX UX_exams_one_published ON exams(status) WHERE status = 'published';
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_exams_one_published' AND object_id = OBJECT_ID('exams'))
+  CREATE UNIQUE INDEX UX_exams_one_published ON exams(status) WHERE status = 'published';
 IF OBJECT_ID('exam_allowed_departments', 'U') IS NULL CREATE TABLE exam_allowed_departments (
   exam_id UNIQUEIDENTIFIER NOT NULL REFERENCES exams(id), department_id UNIQUEIDENTIFIER NOT NULL REFERENCES departments(id), PRIMARY KEY(exam_id, department_id)
 );
@@ -103,7 +106,8 @@ IF OBJECT_ID('exam_attempts', 'U') IS NULL CREATE TABLE exam_attempts (
   auto_submit_reason NVARCHAR(32) NULL CHECK(auto_submit_reason IN ('inactive_timeout','exam_replaced','exam_ended')),
   leave_count INT NOT NULL DEFAULT 0 CHECK(leave_count >= 0), created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
-CREATE UNIQUE INDEX UX_attempt_one_active_official ON exam_attempts(exam_candidate_id) WHERE attempt_type = 'official' AND status = 'in_progress';
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_attempt_one_active_official' AND object_id = OBJECT_ID('exam_attempts'))
+  CREATE UNIQUE INDEX UX_attempt_one_active_official ON exam_attempts(exam_candidate_id) WHERE attempt_type = 'official' AND status = 'in_progress';
 IF OBJECT_ID('attempt_questions', 'U') IS NULL CREATE TABLE attempt_questions (
   id UNIQUEIDENTIFIER NOT NULL DEFAULT NEWSEQUENTIALID() PRIMARY KEY, exam_attempt_id UNIQUEIDENTIFIER NOT NULL REFERENCES exam_attempts(id),
   question_id UNIQUEIDENTIFIER NOT NULL REFERENCES questions(id), order_index INT NOT NULL CHECK(order_index >= 0),
@@ -111,7 +115,7 @@ IF OBJECT_ID('attempt_questions', 'U') IS NULL CREATE TABLE attempt_questions (
   UNIQUE(exam_attempt_id, question_id), UNIQUE(exam_attempt_id, order_index)
 );
 IF OBJECT_ID('attempt_question_answers', 'U') IS NULL CREATE TABLE attempt_question_answers (
-  attempt_question_id UNIQUEIDENTIFIER NOT NULL REFERENCES attempt_questions(id), answer_id UNIQUEIDENTIFIER NOT NULL REFERENCES answers(id), order_index INT NOT NULL CHECK(order_index >= 0),
+  attempt_question_id UNIQUEIDENTIFIER NOT NULL REFERENCES attempt_questions(id), answer_id UNIQUEIDENTIFIER NOT NULL, order_index INT NOT NULL CHECK(order_index >= 0),
   PRIMARY KEY(attempt_question_id, answer_id), UNIQUE(attempt_question_id, order_index)
 );
 IF OBJECT_ID('candidate_answers', 'U') IS NULL CREATE TABLE candidate_answers (
@@ -120,7 +124,7 @@ IF OBJECT_ID('candidate_answers', 'U') IS NULL CREATE TABLE candidate_answers (
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), UNIQUE(exam_attempt_id, question_id)
 );
 IF OBJECT_ID('candidate_answer_selections', 'U') IS NULL CREATE TABLE candidate_answer_selections (
-  candidate_answer_id UNIQUEIDENTIFIER NOT NULL REFERENCES candidate_answers(id), answer_id UNIQUEIDENTIFIER NOT NULL REFERENCES answers(id), PRIMARY KEY(candidate_answer_id, answer_id)
+  candidate_answer_id UNIQUEIDENTIFIER NOT NULL REFERENCES candidate_answers(id), answer_id UNIQUEIDENTIFIER NOT NULL, PRIMARY KEY(candidate_answer_id, answer_id)
 );
 IF OBJECT_ID('results', 'U') IS NULL CREATE TABLE results (
   id UNIQUEIDENTIFIER NOT NULL DEFAULT NEWSEQUENTIALID() PRIMARY KEY, exam_attempt_id UNIQUEIDENTIFIER NOT NULL UNIQUE REFERENCES exam_attempts(id),
@@ -135,7 +139,8 @@ IF OBJECT_ID('practice_sessions', 'U') IS NULL CREATE TABLE practice_sessions (
   started_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), submitted_at DATETIME2 NULL,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
-CREATE INDEX IX_practice_sessions_user_status ON practice_sessions(user_id, status, submitted_at DESC);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_practice_sessions_user_status' AND object_id = OBJECT_ID('practice_sessions'))
+  CREATE INDEX IX_practice_sessions_user_status ON practice_sessions(user_id, status, submitted_at DESC);
 IF OBJECT_ID('practice_session_topics', 'U') IS NULL CREATE TABLE practice_session_topics (
   practice_session_id UNIQUEIDENTIFIER NOT NULL REFERENCES practice_sessions(id), topic_id UNIQUEIDENTIFIER NOT NULL REFERENCES topics(id), PRIMARY KEY(practice_session_id, topic_id)
 );
@@ -145,14 +150,14 @@ IF OBJECT_ID('practice_questions', 'U') IS NULL CREATE TABLE practice_questions 
   order_index INT NOT NULL CHECK(order_index >= 0), UNIQUE(practice_session_id, question_id), UNIQUE(practice_session_id, order_index)
 );
 IF OBJECT_ID('practice_question_options', 'U') IS NULL CREATE TABLE practice_question_options (
-  practice_question_id UNIQUEIDENTIFIER NOT NULL REFERENCES practice_questions(id), answer_id UNIQUEIDENTIFIER NOT NULL REFERENCES answers(id), order_index INT NOT NULL CHECK(order_index >= 0),
+  practice_question_id UNIQUEIDENTIFIER NOT NULL REFERENCES practice_questions(id), answer_id UNIQUEIDENTIFIER NOT NULL, order_index INT NOT NULL CHECK(order_index >= 0),
   PRIMARY KEY(practice_question_id, answer_id), UNIQUE(practice_question_id, order_index)
 );
 IF OBJECT_ID('practice_question_correct_answers', 'U') IS NULL CREATE TABLE practice_question_correct_answers (
-  practice_question_id UNIQUEIDENTIFIER NOT NULL REFERENCES practice_questions(id), answer_id UNIQUEIDENTIFIER NOT NULL REFERENCES answers(id), PRIMARY KEY(practice_question_id, answer_id)
+  practice_question_id UNIQUEIDENTIFIER NOT NULL REFERENCES practice_questions(id), answer_id UNIQUEIDENTIFIER NOT NULL, PRIMARY KEY(practice_question_id, answer_id)
 );
 IF OBJECT_ID('practice_question_selected_answers', 'U') IS NULL CREATE TABLE practice_question_selected_answers (
-  practice_question_id UNIQUEIDENTIFIER NOT NULL REFERENCES practice_questions(id), answer_id UNIQUEIDENTIFIER NOT NULL REFERENCES answers(id), PRIMARY KEY(practice_question_id, answer_id)
+  practice_question_id UNIQUEIDENTIFIER NOT NULL REFERENCES practice_questions(id), answer_id UNIQUEIDENTIFIER NOT NULL, PRIMARY KEY(practice_question_id, answer_id)
 );
 IF OBJECT_ID('study_documents', 'U') IS NULL CREATE TABLE study_documents (
   id UNIQUEIDENTIFIER NOT NULL DEFAULT NEWSEQUENTIALID() PRIMARY KEY, topic_id UNIQUEIDENTIFIER NOT NULL REFERENCES topics(id),
@@ -171,14 +176,16 @@ IF OBJECT_ID('audit_logs', 'U') IS NULL CREATE TABLE audit_logs (
   resource_type NVARCHAR(255) NOT NULL, resource_id UNIQUEIDENTIFIER NULL, metadata NVARCHAR(MAX) NULL, ip_address NVARCHAR(64) NULL,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), CONSTRAINT CK_audit_metadata_json CHECK(metadata IS NULL OR ISJSON(metadata) = 1)
 );
-CREATE INDEX IX_audit_logs_created ON audit_logs(created_at DESC);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_audit_logs_created' AND object_id = OBJECT_ID('audit_logs'))
+  CREATE INDEX IX_audit_logs_created ON audit_logs(created_at DESC);
 IF OBJECT_ID('notifications', 'U') IS NULL CREATE TABLE notifications (
   id UNIQUEIDENTIFIER NOT NULL DEFAULT NEWSEQUENTIALID() PRIMARY KEY, recipient_user_id UNIQUEIDENTIFIER NOT NULL REFERENCES users(id),
   type NVARCHAR(64) NOT NULL CHECK(type IN ('exam_submitted','exam_approved','exam_rejected','exam_published','exam_assignment_failed')),
   title NVARCHAR(500) NOT NULL, message NVARCHAR(MAX) NOT NULL, exam_id UNIQUEIDENTIFIER NULL REFERENCES exams(id), is_read BIT NOT NULL DEFAULT 0,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
-CREATE INDEX IX_notifications_recipient_read_created ON notifications(recipient_user_id, is_read, created_at DESC);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_notifications_recipient_read_created' AND object_id = OBJECT_ID('notifications'))
+  CREATE INDEX IX_notifications_recipient_read_created ON notifications(recipient_user_id, is_read, created_at DESC);
 IF OBJECT_ID('ai_settings', 'U') IS NULL CREATE TABLE ai_settings (
   id UNIQUEIDENTIFIER NOT NULL DEFAULT NEWSEQUENTIALID() PRIMARY KEY, [key] NVARCHAR(64) NOT NULL UNIQUE DEFAULT 'default', is_enabled BIT NOT NULL DEFAULT 0,
   base_url NVARCHAR(MAX) NOT NULL DEFAULT 'https://generativelanguage.googleapis.com/v1beta/openai', api_key NVARCHAR(MAX) NOT NULL DEFAULT '',
@@ -186,3 +193,26 @@ IF OBJECT_ID('ai_settings', 'U') IS NULL CREATE TABLE ai_settings (
   max_doc_chars INT NOT NULL DEFAULT 60000 CHECK(max_doc_chars BETWEEN 5000 AND 400000), updated_by UNIQUEIDENTIFIER NULL REFERENCES users(id),
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
+GO
+
+/* Nâng cấp database đã tạo từ bản schema cũ. Chạy lại nhiều lần vẫn an toàn. */
+-- Đáp án được xóa/tạo lại khi sửa câu hỏi nên bảng lịch sử không đặt khóa ngoại tới answers
+DECLARE @sql NVARCHAR(MAX) = N'';
+SELECT @sql += N'ALTER TABLE ' + QUOTENAME(OBJECT_NAME(parent_object_id)) + N' DROP CONSTRAINT ' + QUOTENAME(name) + N';'
+  FROM sys.foreign_keys WHERE referenced_object_id = OBJECT_ID('answers');
+-- UNIQUE thường chỉ cho 1 dòng NULL: bỏ để thay bằng unique index có điều kiện
+SELECT @sql += N'ALTER TABLE ' + QUOTENAME(OBJECT_NAME(k.parent_object_id)) + N' DROP CONSTRAINT ' + QUOTENAME(k.name) + N';'
+  FROM sys.key_constraints k
+  JOIN sys.index_columns ic ON ic.object_id = k.parent_object_id AND ic.index_id = k.unique_index_id
+  JOIN sys.columns col ON col.object_id = ic.object_id AND col.column_id = ic.column_id
+ WHERE k.type = 'UQ'
+   AND ((k.parent_object_id = OBJECT_ID('departments') AND col.name IN ('slug', 'code'))
+     OR (k.parent_object_id = OBJECT_ID('employees') AND col.name = 'employee_code'));
+EXEC sp_executesql @sql;
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_departments_slug' AND object_id = OBJECT_ID('departments'))
+  CREATE UNIQUE INDEX UX_departments_slug ON departments(slug) WHERE slug IS NOT NULL AND slug <> '';
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_departments_code' AND object_id = OBJECT_ID('departments'))
+  CREATE UNIQUE INDEX UX_departments_code ON departments(code) WHERE code IS NOT NULL AND code <> '';
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_employees_employee_code' AND object_id = OBJECT_ID('employees'))
+  CREATE UNIQUE INDEX UX_employees_employee_code ON employees(employee_code) WHERE employee_code IS NOT NULL AND employee_code <> '';

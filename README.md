@@ -37,8 +37,8 @@ Hệ thống xây dựng theo kiến trúc Client-Server phân lớp hiện đ�
 
 ### Server (Backend)
 * **Runtime**: Node.js (Phiên bản `>=22.0.0 <25.0.0`).
-* **Framework**: Express.js (Kiến trúc RESTful API chuẩn mực, phân tách Router - Controller - Service - Model rõ ràng).
-* **Cơ sở dữ liệu**: MongoDB & Mongoose ODM (Quản lý 21 Models/Collections dữ liệu quan hệ chặt chẽ).
+* **Framework**: Express.js (Kiến trúc RESTful API chuẩn mực, phân tách Router - Controller - Service rõ ràng).
+* **Cơ sở dữ liệu**: Microsoft SQL Server & [mssql](https://www.npmjs.com/package/mssql) (Hệ quản trị CSDL quan hệ chuẩn ACID, 30 bảng dữ liệu với ràng buộc khóa ngoại, CHECK constraints và filtered unique indexes).
 * **Trợ lý AI & Mô hình ngôn ngữ lớn (LLM)**:
   * Tương thích chuẩn OpenAI API / Google Gemini API.
   * Đọc và bóc tách nội dung tài liệu PDF/Word/Excel (`unpdf`, `mammoth`, `xlsx`).
@@ -46,11 +46,11 @@ Hệ thống xây dựng theo kiến trúc Client-Server phân lớp hiện đ�
 * **Xác thực & Bảo mật**:
   * Xác thực kép **JWT** (`accessToken` ngắn hạn lưu bộ nhớ client, `refreshToken` dài hạn trong `httpOnly cookie`).
   * Cơ chế **`tokenVersion`** thu hồi phiên tức thì trên mọi thiết bị khi phát hiện đăng nhập mới hoặc đổi mật khẩu (chống đăng nhập đồng thời 1 tài khoản).
-  * Tự động khóa tài khoản tạm thời khi đăng nhập sai quá số lần quy định (`failedLoginAttempts`, `lockUntil`).
+  * Tự động khóa tài khoản tạm thời khi đăng nhập sai quá số lần quy định (`failed_login_attempts`, `lock_until`).
   * `Helmet` bảo vệ các HTTP headers, `CORS` cấu hình an toàn cho phép giao tiếp Client-Server.
   * `express-rate-limit` giới hạn tần suất theo IP và theo `userId` (đăng nhập, làm bài thi, gọi Trợ lý AI).
 * **Tiến trình tự động (Cron Schedulers)**:
-  * **Sao lưu đám mây**: Tự động dump, nén `.gz` và sao lưu CSDL lên Google Drive lúc 03:00 hàng ngày (`0 3 * * *`, xoay vòng tối đa 5 bản lưu) kèm mã hóa `BACKUP_ENCRYPTION_KEY`.
+  * **Sao lưu đám mây**: Tự động sao lưu CSDL (`BACKUP DATABASE`) lên Google Drive lúc 03:00 hàng ngày (`0 3 * * *`, xoay vòng tối đa 5 bản lưu) kèm mã hóa `BACKUP_ENCRYPTION_KEY`.
   * **Dọn file tạm**: Tự động dọn dẹp file upload tạm quá 6 tiếng mỗi giờ một lần (`0 * * * *`).
   * **Dọn tài khoản khóa lâu**: Tự động quét và xóa cứng các tài khoản bị khóa liên tục quá 6 tháng không có lịch sử thi/audit lúc 04:00 hàng ngày (`0 4 * * *`).
   * **Quét bài thi bỏ rơi**: Tự động nộp và chấm điểm các bài thi bị mất kết nối quá thời gian quy định mỗi 1 phút (`* * * * *`).
@@ -63,18 +63,18 @@ Hệ thống xây dựng theo kiến trúc Client-Server phân lớp hiện đ�
 
 ## 3. Cấu trúc Mô hình & Dữ liệu Hệ thống
 
-Hệ thống tổ chức dữ liệu chặt chẽ qua 21 Collections trong MongoDB:
+Hệ thống tổ chức dữ liệu chặt chẽ qua 30 bảng quan hệ trong SQL Server với đầy đủ ràng buộc toàn vẹn:
 
-| Phân nhóm dữ liệu | Models / Collections | Mô tả vai trò & Chức năng |
+| Phân nhóm dữ liệu | Bảng (Tables) | Mô tả vai trò & Chức năng |
 | :--- | :--- | :--- |
-| **Tài khoản & Tổ chức** | `User`, `Role`, `Department`, `Employee` | Quản lý tài khoản đăng nhập, vai trò hệ thống, danh mục phòng ban/phân xưởng, thông tin hồ sơ nhân viên và danh sách phòng kiêm nhiệm (`extraDepartmentIds`). |
-| **Ngân hàng câu hỏi & Chủ đề** | `Topic`, `Question`, `Answer` | Quản lý chuyên môn/chủ đề, nội dung câu hỏi (đơn/nhiều đáp án, mức độ khó, ảnh minh họa Cloudinary, phạm vi chung/riêng, mục đích `exam`/`practice`) và các lựa chọn đáp án. |
-| **Đề thi & Thí sinh** | `Exam`, `ExamCode`, `ExamCodeQuestion`, `ExamCandidate`, `Schedule` | Cấu trúc ma trận kỳ thi, trạng thái duyệt (`draft` -> `pending_review` -> `approved` -> `published`), mã đề ngẫu nhiên sinh cho từng thí sinh, danh sách thí sinh dự thi và lịch thi. |
-| **Phòng thi & Kết quả** | `ExamAttempt`, `AttemptQuestion`, `CandidateAnswer`, `Result` | Quá trình làm bài thi trực tuyến, snapshot câu hỏi/đáp án xáo trộn, lưu vết câu trả lời, trạng thái nộp bài và bảng điểm/kết quả thi chính thức. |
-| **Luyện tập cá nhân** | `PracticeSession` | Lưu trữ các phiên thí sinh tự do luyện tập cá nhân (chế độ kiểm tra ngay hoặc mô phỏng thi, thống kê điểm, thời gian hoàn thành). |
-| **Tài liệu học tập** | `StudyDocument` | Lưu trữ file tài liệu ôn tập (.pdf, .docx, .xlsx), phân quyền truy cập theo phòng ban hoặc toàn đơn vị. |
-| **Giám sát & Thông báo** | `AuditLog`, `Notification` | Nhật ký ghi vết kiểm toán toàn bộ thao tác nhạy cảm (kèm IP, metadata) và hệ thống thông báo chuông in-app thời gian thực. |
-| **Cấu hình Trợ lý AI** | `AiSetting` | Cấu hình Base URL, API Key, Model, System Prompt, hạn mức ký tự tài liệu và công tắc bật/tắt AI toàn hệ thống. |
+| **Tài khoản & Tổ chức** | `users`, `roles`, `departments`, `employees`, `employee_extra_departments` | Quản lý tài khoản đăng nhập, vai trò hệ thống, danh mục phòng ban/phân xưởng, thông tin hồ sơ nhân viên và danh sách phòng kiêm nhiệm (bảng junction `employee_extra_departments`). |
+| **Ngân hàng câu hỏi & Chủ đề** | `topics`, `questions`, `answers` | Quản lý chuyên môn/chủ đề, nội dung câu hỏi (đơn/nhiều đáp án, mức độ khó, ảnh minh họa Cloudinary, phạm vi `Common`/`DepartmentSpecific`, mục đích `exam`/`practice`) và các lựa chọn đáp án. CHECK constraint đảm bảo câu `DepartmentSpecific` buộc phải có `department_id`. |
+| **Đề thi & Thí sinh** | `exams`, `exam_allowed_departments`, `exam_codes`, `exam_code_questions`, `exam_candidates`, `schedules` | Cấu trúc ma trận kỳ thi, trạng thái duyệt (`draft` → `pending_review` → `approved` → `published`), filtered unique index chỉ cho phép 1 kỳ thi `published` tại 1 thời điểm, mã đề ngẫu nhiên sinh cho từng thí sinh, danh sách thí sinh dự thi và lịch thi. `ROWVERSION` trên bảng `exams` xử lý xung đột đồng thời (optimistic concurrency). |
+| **Phòng thi & Kết quả** | `exam_attempts`, `attempt_questions`, `attempt_question_answers`, `candidate_answers`, `candidate_answer_selections`, `results` | Quá trình làm bài thi trực tuyến, snapshot câu hỏi/đáp án xáo trộn, lưu vết câu trả lời, trạng thái nộp bài và bảng điểm/kết quả thi chính thức. Filtered unique index đảm bảo mỗi thí sinh chỉ có 1 bài thi chính thức đang `in_progress`. |
+| **Luyện tập cá nhân** | `practice_sessions`, `practice_session_topics`, `practice_questions`, `practice_question_options`, `practice_question_correct_answers`, `practice_question_selected_answers` | Lưu trữ các phiên tự do luyện tập cá nhân (chế độ kiểm tra ngay hoặc mô phỏng thi), snapshot câu hỏi/đáp án xáo trộn, thống kê điểm, thời gian hoàn thành. |
+| **Tài liệu học tập** | `study_documents` | Lưu trữ file tài liệu ôn tập (.pdf, .docx, .xlsx), phân quyền truy cập theo phòng ban hoặc toàn đơn vị. |
+| **Giám sát & Thông báo** | `audit_logs`, `notifications` | Nhật ký ghi vết kiểm toán toàn bộ thao tác nhạy cảm (kèm IP, metadata JSON validated bởi `ISJSON()`) và hệ thống thông báo chuông in-app thời gian thực. |
+| **Cấu hình Trợ lý AI** | `ai_settings` | Cấu hình Base URL, API Key, Model, System Prompt, hạn mức ký tự tài liệu và công tắc bật/tắt AI toàn hệ thống. |
 
 ---
 
@@ -116,7 +116,7 @@ Hệ thống tổ chức dữ liệu chặt chẽ qua 21 Collections trong Mongo
 
 ### 3. Người duyệt đề (Leader) - Gồm 8 phân hệ chính:
 * **Tổng quan**: Dashboard số liệu toàn diện về các kỳ thi, tỷ lệ hoàn thành và chất lượng bài làm.
-* **Duyệt kỳ thi**: Phê duyệt hoặc từ chối đề xuất kỳ thi kèm lý do chi tiết; cấu hình thời gian bắt đầu/kết thúc (`startDate`, `endDate`); phát hành chính thức kỳ thi (kích hoạt thuật toán sinh mã đề độc lập); **cấp thêm lượt thi** cho thí sinh gặp sự cố bất khả kháng.
+* **Duyệt kỳ thi**: Phê duyệt hoặc từ chối đề xuất kỳ thi kèm lý do chi tiết; cấu hình thời gian bắt đầu/kết thúc (`start_date`, `end_date`); phát hành chính thức kỳ thi (kích hoạt thuật toán sinh mã đề độc lập); **cấp thêm lượt thi** cho thí sinh gặp sự cố bất khả kháng.
 * **Theo phòng ban**: Thống kê số lượng dự thi, điểm trung bình và tỷ lệ đạt/không đạt của từng đơn vị.
 * **Năng lực phòng ban**: Biểu đồ Radar so sánh năng lực chuyên môn của các phòng ban theo từng chủ đề.
 * **Dấu hiệu bất thường**: Phát hiện các dấu hiệu nghi vấn (cặp thí sinh có chuỗi đáp án sai trùng lặp, các ca thi hoàn thành nhanh bất thường so với thời gian trung bình).
@@ -128,7 +128,7 @@ Hệ thống tổ chức dữ liệu chặt chẽ qua 21 Collections trong Mongo
 * **Tổng quan**: Thống kê tổng số tài khoản, tình trạng máy chủ và thông tin quản trị.
 * **Tài khoản**: Quản lý người dùng, tạo nhanh đơn lẻ hoặc tạo phòng ban inline; quy trình **Import Excel 2 bước** (Preview kiểm tra trùng mã/tài khoản khóa rồi mới Confirm); **Xuất file Excel cấp mật khẩu tạm** cho thí sinh; khóa/mở khóa tài khoản; phân quyền vai trò.
 * **Nhật ký (Audit Log)**: Theo dõi toàn bộ lịch sử thao tác hệ thống (đăng nhập, đổi mật khẩu, sửa phân quyền, sao lưu, duyệt đề, nộp bài...) có bộ lọc thông minh theo người thao tác, nhân viên và phòng ban.
-* **Sao lưu & Phục hồi**: Tạo bản sao lưu CSDL tức thì lên Google Drive, tải bản sao lưu `.gz`, xem danh sách các bản sao lưu xoay vòng và khôi phục CSDL an toàn kèm mã xác nhận bảo mật.
+* **Sao lưu & Phục hồi**: Tạo bản sao lưu CSDL tức thì (`BACKUP DATABASE`) lên Google Drive, tải bản sao lưu `.bak`, xem danh sách các bản sao lưu xoay vòng và khôi phục CSDL an toàn (`RESTORE DATABASE`) kèm mã xác nhận bảo mật.
 * **Trợ lý AI**: Bật/tắt Trợ lý AI toàn hệ thống, cấu hình Base URL, API Key, Model, System Prompt và hạn mức ký tự trích xuất tài liệu.
 
 ---
@@ -137,14 +137,15 @@ Hệ thống tổ chức dữ liệu chặt chẽ qua 21 Collections trong Mongo
 
 * 🤖 **Bộ 3 Trợ lý AI Chuyên biệt**: Hỗ trợ Thí sinh ôn tập trực quan (Mindmap/Mermaid/Voice), Người ra đề sinh câu hỏi chuẩn mẫu, và Leader phân tích số liệu báo cáo.
 * ⚡ **Phòng thi An toàn Thời gian thực**: Tự động lưu đáp án tức thì (Autosave), giữ nhịp tim Heartbeat 15s/lần, tự động nộp và chấm điểm khi thí sinh ngắt kết nối quá thời gian quy định (`inactive_timeout`).
-* 👥 **Hỗ trợ Nhân sự Kiêm nhiệm**: Hỗ trợ nhân viên thuộc nhiều phòng ban (`extraDepartmentIds`), thí sinh chủ động chọn vai trò thi trước khi làm bài và hệ thống tự động khóa vai trò gắn vào kết quả thi.
-* ⚖️ **Công tắc Bù câu hỏi chung (`allowCommonCompensation`)**: Linh hoạt cho phép hoặc chặn bù trừ câu hỏi chung khi ngân hàng câu hỏi riêng của một phòng ban chưa đủ số lượng cấu hình.
+* 👥 **Hỗ trợ Nhân sự Kiêm nhiệm**: Hỗ trợ nhân viên thuộc nhiều phòng ban (bảng `employee_extra_departments`), thí sinh chủ động chọn vai trò thi trước khi làm bài và hệ thống tự động khóa vai trò gắn vào kết quả thi.
+* ⚖️ **Công tắc Bù câu hỏi chung (`allow_common_compensation`)**: Linh hoạt cho phép hoặc chặn bù trừ câu hỏi chung khi ngân hàng câu hỏi riêng của một phòng ban chưa đủ số lượng cấu hình.
 * 🎲 **Xáo trộn Mã đề Độc lập (Fisher–Yates)**: Tự động trộn ngẫu nhiên thứ tự câu hỏi và thứ tự phương án trả lời độc lập cho từng thí sinh, đảm bảo không trùng lặp mã đề trong phòng thi.
 * 🔒 **Chống Lộ đề Thi Nghiêm ngặt**: Phân tách rạch ròi 2 ngân hàng câu hỏi `exam` và `practice`. Hệ thống tự động chặn chuyển câu hỏi sang ngân hàng Ôn tập nếu chủ đề đang nằm trong kỳ thi đang diễn ra.
-* 🛡️ **Kiểm soát Phiên Đơn & Chống Đăng nhập Đồng thời**: Quản lý phiên qua cơ chế `tokenVersion`, tự động cảnh báo và đăng xuất tức thì nếu tài khoản được đăng nhập ở thiết bị/trình duyệt khác.
+* 🛡️ **Kiểm soát Phiên Đơn & Chống Đăng nhập Đồng thời**: Quản lý phiên qua cơ chế `token_version`, tự động cảnh báo và đăng xuất tức thì nếu tài khoản được đăng nhập ở thiết bị/trình duyệt khác.
 * 🔑 **Công cụ CLI Khôi phục Mật khẩu Admin**: Hỗ trợ lệnh dòng lệnh `npm run reset-admin` giúp đặt lại mật khẩu và gỡ khóa tài khoản Admin tức thì khi lỡ quên mật khẩu mà không cần thao tác trực tiếp trên CSDL.
-* 💾 **Sao lưu Tự động Đám mây & Khôi phục Trực quan**: Tự động backup CSDL lên Google Drive lúc 03:00 hàng ngày, mã hóa bản lưu an toàn và hỗ trợ khôi phục trực tiếp với thanh tiến trình % trực quan.
+* 💾 **Sao lưu Tự động Đám mây & Khôi phục Trực quan**: Tự động backup CSDL (`BACKUP DATABASE ... TO DISK`) lên Google Drive lúc 03:00 hàng ngày, mã hóa bản lưu an toàn và hỗ trợ khôi phục (`RESTORE DATABASE`) trực tiếp với thanh tiến trình % trực quan.
 * 🧹 **Tiến trình Tự động Dọn dẹp**: Tự động dọn file tạm uploads mỗi giờ, quét nộp bài thi bỏ rơi mỗi phút và xóa an toàn các tài khoản bị khóa liên tục quá 6 tháng không có lịch sử.
+* 🔗 **Toàn vẹn dữ liệu quan hệ**: Toàn bộ 30 bảng sử dụng `FOREIGN KEY`, `CHECK` constraints, filtered `UNIQUE INDEX` và `ROWVERSION` (optimistic concurrency) đảm bảo tính nhất quán dữ liệu ở tầng CSDL.
 
 ---
 
@@ -152,15 +153,15 @@ Hệ thống tổ chức dữ liệu chặt chẽ qua 21 Collections trong Mongo
 
 ### Yêu cầu môi trường
 * **Node.js**: Phiên bản `>= 22.0.0 < 25.0.0`
-* **MongoDB**: MongoDB Atlas hoặc MongoDB Community Server cục bộ (`>= 7.0`)
+* **Microsoft SQL Server**: SQL Server 2019 trở lên (Express, Developer hoặc Standard)
 * **Tài khoản Cloudinary & Google Cloud Console** (dành cho upload ảnh câu hỏi và sao lưu Google Drive)
 
 ### Các bước thực hiện
 
 1. **Clone mã nguồn dự án:**
    ```bash
-   git clone https://github.com/duong218/z176lms.git
-   cd z176lms
+   git clone https://github.com/duong218/z176thitracnghiem.git
+   cd z176thitracnghiem
    ```
 
 2. **Cài đặt dependencies:**
@@ -179,7 +180,8 @@ Hệ thống tổ chức dữ liệu chặt chẽ qua 21 Collections trong Mongo
      ```env
      NODE_ENV=development
      PORT=5000
-     # SQL Server (tài khoản chỉ cần quyền tạo database khi chạy db:init)
+
+     # SQL Server
      SQL_SERVER_HOST=localhost
      SQL_SERVER_PORT=1433
      SQL_SERVER_DATABASE=z176_exam
@@ -201,10 +203,12 @@ Hệ thống tổ chức dữ liệu chặt chẽ qua 21 Collections trong Mongo
      ADMIN_SEED_PASSWORD=your_admin_password
      ADMIN_SEED_MUST_CHANGE_PASSWORD=false
 
+     # Cloudinary (upload ảnh câu hỏi)
      CLOUDINARY_CLOUD_NAME=your_cloudinary_name
      CLOUDINARY_API_KEY=your_cloudinary_key
      CLOUDINARY_API_SECRET=your_cloudinary_secret
 
+     # Google Drive Backup
      GOOGLE_OAUTH_CLIENT_ID=your_google_client_id
      GOOGLE_OAUTH_CLIENT_SECRET=your_google_client_secret
      GOOGLE_REFRESH_TOKEN=your_google_refresh_token
@@ -219,11 +223,11 @@ Hệ thống tổ chức dữ liệu chặt chẽ qua 21 Collections trong Mongo
 4. **Khởi tạo SQL Server và dữ liệu mẫu:**
    ```bash
    cd server
-   # Tạo cơ sở dữ liệu, các bảng và ràng buộc quan hệ:
+
+   # Tạo cơ sở dữ liệu, 30 bảng và ràng buộc quan hệ:
    npm run db:init
 
    # Khởi tạo vai trò mặc định và tài khoản Admin ban đầu:
-   npm run seed:sql
    npm run seed
 
    # Đặt lại mật khẩu Admin nếu lỡ quên hoặc tài khoản bị khóa:
@@ -239,7 +243,7 @@ Hệ thống tổ chức dữ liệu chặt chẽ qua 21 Collections trong Mongo
    # Chạy Client Frontend (tại thư mục client ở một terminal khác)
    npm run dev
    ```
-   * **Client UI**: `http://localhost:3000` (hoặc `http://localhost:5173`)
+   * **Client UI**: `http://localhost:5173`
    * **Server API**: `http://localhost:5000/api`
 
 ---
@@ -247,17 +251,22 @@ Hệ thống tổ chức dữ liệu chặt chẽ qua 21 Collections trong Mongo
 ## 7. Danh mục Lệnh Dòng Lệnh (CLI Scripts)
 
 ### Phía Server (`server/`)
-* `npm run dev`: Chạy server chế độ phát triển với cờ `--watch-path=src`.
-* `npm run start`: Chạy server môi trường sản xuất (`node src/index.js`).
-* `npm run seed`: Chạy script khởi tạo dữ liệu mẫu và tài khoản admin ban đầu.
-* `npm run reset-admin [password] [username]`: Đặt lại mật khẩu và gỡ khóa tài khoản Admin tức thì.
-* `npm run backup`: Kích hoạt tiến trình sao lưu CSDL ngay lập tức lên Google Drive qua CLI.
+| Lệnh | Mô tả |
+| :--- | :--- |
+| `npm run dev` | Chạy server chế độ phát triển với cờ `--watch-path=src`. |
+| `npm run start` | Chạy server môi trường sản xuất (`node src/index.js`). |
+| `npm run db:init` | Tạo database, 30 bảng và toàn bộ ràng buộc từ `server/sql/schema.sql`. |
+| `npm run seed` | Khởi tạo vai trò mặc định và tài khoản Admin ban đầu. |
+| `npm run reset-admin [password] [username]` | Đặt lại mật khẩu và gỡ khóa tài khoản Admin tức thì. |
+| `npm run backup` | Kích hoạt sao lưu CSDL (`BACKUP DATABASE`) ngay lập tức lên Google Drive qua CLI. |
 
 ### Phía Client (`client/`)
-* `npm run dev`: Chạy ứng dụng Vite React trên cổng 3000 (`--host=0.0.0.0`).
-* `npm run build`: Đóng gói ứng dụng để triển khai production.
-* `npm run preview`: Xem trước bản build production cục bộ.
-* `npm run lint`: Kiểm tra chất lượng mã nguồn bằng ESLint.
+| Lệnh | Mô tả |
+| :--- | :--- |
+| `npm run dev` | Chạy ứng dụng Vite React trên cổng mặc định (`--host=0.0.0.0`). |
+| `npm run build` | Đóng gói ứng dụng để triển khai production. |
+| `npm run preview` | Xem trước bản build production cục bộ. |
+| `npm run lint` | Kiểm tra chất lượng mã nguồn bằng ESLint. |
 
 ---
 *Bản quyền sản phẩm thuộc về tác giả Phạm Ngọc Dương - Sinh viên K67 - Khoa Công nghệ thông tin - Học viện Nông nghiệp Việt Nam.*

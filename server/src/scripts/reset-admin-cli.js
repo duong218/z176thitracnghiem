@@ -28,7 +28,7 @@ async function main() {
   let adminUser = null;
 
   // Tìm role admin trước
-  const roleRows = await query("SELECT id FROM roles WHERE code = 'admin'");
+  const { recordset: roleRows } = await query("SELECT id FROM roles WHERE code = 'admin'");
   if (roleRows.length === 0) {
     // eslint-disable-next-line no-console
     console.error('❌ Lỗi: Không tìm thấy vai trò "admin" trong cơ sở dữ liệu!');
@@ -40,13 +40,13 @@ async function main() {
   // Ưu tiên tìm theo username cụ thể (nếu có truyền vào hoặc cấu hình trong .env)
   const candidateUsername = customUsername || configuredUsername;
   if (candidateUsername) {
-    const userRows = await query('SELECT * FROM users WHERE username = @username', { username: candidateUsername });
+    const { recordset: userRows } = await query('SELECT * FROM users WHERE username = @username', { username: candidateUsername });
     if (userRows.length > 0) adminUser = userRows[0];
   }
 
   // Nếu không tìm thấy hoặc không có username cấu hình, tìm tài khoản đầu tiên có role là admin
   if (!adminUser) {
-    const userRows = await query('SELECT TOP 1 * FROM users WHERE role_id = @roleId ORDER BY created_at ASC', { roleId: adminRoleId });
+    const { recordset: userRows } = await query('SELECT TOP 1 * FROM users WHERE role_id = @roleId ORDER BY created_at ASC', { roleId: adminRoleId });
     if (userRows.length > 0) adminUser = userRows[0];
   }
 
@@ -56,7 +56,7 @@ async function main() {
     const usernameToCreate = candidateUsername || 'admin';
     const passwordHash = await bcrypt.hash(targetPassword, env.bcryptSaltRounds);
 
-    const inserted = await query(`
+    const { recordset: inserted } = await query(`
       INSERT INTO users (username, password_hash, role_id, is_active, must_change_password, failed_login_attempts, lock_until, token_version)
       OUTPUT INSERTED.*
       VALUES (@username, @passwordHash, @roleId, 1, 0, 0, NULL, 1)
