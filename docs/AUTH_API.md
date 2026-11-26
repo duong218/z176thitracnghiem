@@ -18,7 +18,7 @@ Hệ thống Z176 áp dụng cơ chế xác thực kép (Dual Token) thông qua 
 
 ## 2. Quy trình Khởi động hệ thống (Database Seeding)
 
-- Khi khởi động server lần đầu hoặc bật cờ `SEED_ON_START = 'true'`, hệ thống tự động kiểm tra và khởi tạo 4 vai trò mặc định (`admin`, `examiner`, `leader`, `candidate`) vào collection `roles`.
+- Khi khởi động server lần đầu hoặc bật cờ `SEED_ON_START = 'true'`, hệ thống tự động kiểm tra và khởi tạo 4 vai trò mặc định (`admin`, `examiner`, `leader`, `candidate`) vào bảng `roles`.
 - Đồng thời, tạo tài khoản quản trị ban đầu dựa trên biến môi trường `ADMIN_SEED_USERNAME` (hoặc `ADMIN_SEED_EMAIL`) và `ADMIN_SEED_PASSWORD`. Tài khoản này được gán `mustChangePassword: true` để yêu cầu bắt buộc đổi mật khẩu ở lần đăng nhập đầu tiên.
 - Tự động tạo hồ sơ `Employee` tương ứng và liên kết phòng ban Ban Giám đốc cho tài khoản Admin mặc định nếu chưa tồn tại.
 

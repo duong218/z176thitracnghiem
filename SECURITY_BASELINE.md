@@ -65,7 +65,7 @@
 ## 6. Input, Validation & Tầng Mạng
 
 - [x] Validate ở cả client (UX) và server (bắt buộc) — không tin dữ liệu gửi từ client.
-- [x] Chống NoSQL Injection: Sử dụng Mongoose ODM với Parameterized Query, kiểm tra định dạng `ObjectId` trước khi truy vấn.
+- [x] Chống SQL Injection: Sử dụng thư viện `mssql` với Parameterized Query (tham số hóa `@p0`, `@p1`...), kiểm tra định dạng UUID (`UNIQUEIDENTIFIER`) trước khi truy vấn.
 - [x] Chống XSS & Clickjacking: `helmet()` tự động thiết lập các header an toàn (`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, ẩn `X-Powered-By`).
 - [x] CORS cấu hình chặt chẽ theo danh sách whitelist trong biến môi trường `CORS_ORIGIN`.
 - [x] **Rate Limiting thông minh (Keyed Rate Limiting)**:
@@ -85,7 +85,7 @@
 1. [x] Đã đối chiếu với danh sách nguyên tắc cứng trong `SKILLS.md` mục 4.
 2. [x] Không để lộ thông tin đáp án đúng (`isCorrect`) hoặc cấu trúc đề thi bí mật xuống client.
 3. [x] Mọi endpoint mới đều có middleware xác thực và phân quyền đúng role.
-4. [x] Đã kiểm tra tính tương thích ngược và ràng buộc dữ liệu tại Mongoose Schema.
+4. [x] Đã kiểm tra tính tương thích ngược và ràng buộc dữ liệu tại SQL Server Schema (`server/sql/schema.sql`).
 5. [x] Chạy kiểm thử luồng đăng nhập, làm bài thi, autosave, heartbeat và báo cáo xuất Excel.
 6. [x] Dữ liệu kiểm thử sử dụng dữ liệu giả lập (mock data), không sử dụng thông tin thật của cán bộ Nhà máy Z176.
 

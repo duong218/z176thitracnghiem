@@ -20,7 +20,7 @@ import {
 } from '../models/constants.js';
 
 const MAX_OFFICIAL_ATTEMPTS = 1;
-const INACTIVITY_TIMEOUT_MS = 60_000;
+const INACTIVITY_TIMEOUT_MS = 180_000;
 const ABANDONED_ATTEMPT_WINDOW_MS = 2 * 60_000;
 const SUBMIT_GRACE_MS = 30_000; // nộp trễ hơn hạn quá mức này: chỉ chấm đáp án đã lưu
 const EXAM_REPLACED_MESSAGE =

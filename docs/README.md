@@ -28,8 +28,8 @@ Thư mục này chứa tài liệu đặc tả kỹ thuật, mô hình dữ li�
 - **[client/](file:///d:/code%20file/Z176-main/client)** — Ứng dụng Frontend React 19 + Vite + Tailwind CSS v4.
   - Thiết kế Mobile-first, font chữ tối thiểu 16px, bảng màu nghiêm túc.
   - Thành phần phòng thi toàn màn hình `ExamModal.jsx`, quản lý thông báo `ToastContext.jsx`, hộp thoại xác nhận `ConfirmDialog.jsx`.
-- **[server/](file:///d:/code%20file/Z176-main/server)** — Ứng dụng Backend Node.js / Express API + MongoDB/Mongoose.
-  - Kiến trúc phân lớp: Controllers, Services, Models, Routes, Middlewares, Schedulers.
+- **[server/](file:///d:/code%20file/Z176-main/server)** — Ứng dụng Backend Node.js / Express API + Microsoft SQL Server (`mssql`).
+  - Kiến trúc phân lớp: Controllers, Services, DB Helpers (`sql-server.js`, `sql-helpers.js`), Routes, Middlewares, Schedulers.
   - Hệ thống 4 tác vụ định kỳ tự động (`node-cron`): Backup Google Drive (03:00), Cleanup file tạm (mỗi 1h), Purge tài khoản khóa > 6 tháng (04:00), và Quét bài thi bị bỏ dở (mỗi 1 phút).
 
 ---

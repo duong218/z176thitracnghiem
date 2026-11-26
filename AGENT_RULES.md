@@ -30,7 +30,7 @@
    - Tuyệt đối không upload ảnh scan văn bản mật hoặc căn cước/hồ sơ cá nhân lên Cloudinary.
 2. 🔒 **Sao lưu cơ sở dữ liệu (Google Drive Backup)**:
    - Module sao lưu tự động/thủ công (`backup.service.js`) kết nối đến Google Drive chỉ định của đơn vị qua giao thức OAuth2 (Client ID, Client Secret, Refresh Token được bảo mật qua biến môi trường `.env`).
-   - Tệp sao lưu nén định dạng `.gz` chuẩn BSON từ `mongodump`, tuyệt đối không dùng link chia sẻ công khai.
+   - Tệp sao lưu định dạng `.bak` từ `BACKUP DATABASE` của SQL Server (có thể mã hóa bằng `BACKUP_ENCRYPTION_KEY`), tuyệt đối không dùng link chia sẻ công khai.
 3. 🔒 **Tài liệu học tập & Ôn tập nội bộ (.pdf, .docx, .xlsx)**:
    - Lưu trữ cục bộ hoàn toàn trên đĩa máy chủ nội bộ (`server/uploads/study-documents/`).
    - Truy cập file bắt buộc qua stream có xác thực JWT (`study-document.service.js`), kiểm tra quyền tải/đọc theo phòng ban, tuyệt đối không đặt trong thư mục public static.
@@ -49,15 +49,15 @@
 1. **Controller mỏng, Service dày (Thin Controllers, Rich Services)**:
    - Controller chỉ làm nhiệm vụ tiếp nhận `req`, trích xuất `params/query/body`, gọi Service xử lý và trả về `res.status().json()`.
    - Toàn bộ logic nghiệp vụ, tính toán điểm số, kiểm tra ràng buộc thời gian, phân quyền dữ liệu và ghi Audit Log bắt buộc nằm trong `server/src/services/`.
-2. **Quản lý dữ liệu với 16 Mongoose Models**:
-   - Mọi truy vấn và mô hình hóa dữ liệu phải tuân thủ chuẩn 16 Model hiện có:
-     - *Hệ thống & Tổ chức:* `User`, `Role`, `Department`, `Employee`, `AuditLog`, `AiSetting`
-     - *Ngân hàng câu hỏi:* `Topic`, `Question`, `Answer` (hỗ trợ phân định `usage: 'exam'` vs `'practice'`, phạm vi `Common` vs `DepartmentSpecific`)
-     - *Thi & Luyện tập:* `Exam`, `ExamCode`, `ExamCodeQuestion`, `ExamCandidate`, `ExamAttempt`, `AttemptQuestion`, `CandidateAnswer`, `Result`, `PracticeSession`
-     - *Tài liệu & Thông báo:* `StudyDocument`, `Notification`
+2. **Quản lý dữ liệu với 30 bảng quan hệ SQL Server (`server/sql/schema.sql`)**:
+   - Mọi truy vấn và mô hình hóa dữ liệu phải tuân thủ chuẩn schema SQL Server hiện có (qua `server/src/db/sql-server.js` và `server/src/db/sql-helpers.js`):
+     - *Hệ thống & Tổ chức:* `users`, `roles`, `departments`, `employees`, `employee_extra_departments`, `audit_logs`, `ai_settings`
+     - *Ngân hàng câu hỏi:* `topics`, `questions`, `answers` (hỗ trợ phân định `usage: 'exam'` vs `'practice'`, phạm vi `Common` vs `DepartmentSpecific`)
+     - *Thi & Luyện tập:* `exams`, `exam_allowed_departments`, `exam_codes`, `exam_code_questions`, `exam_candidates`, `exam_attempts`, `attempt_questions`, `attempt_question_answers`, `candidate_answers`, `candidate_answer_selections`, `results`, `practice_sessions` (và các bảng chi tiết)
+     - *Tài liệu & Thông báo:* `study_documents`, `notifications`, `schedules`
 3. **Quản trị Tiến trình nền (Cron Schedulers)**:
    - Hệ thống vận hành 4 tác vụ định kỳ tự động (`server/src/schedulers/`):
-     - `backup.scheduler.js`: Sao lưu MongoDB và tải lên Google Drive (chạy lúc 03:00 hàng ngày).
+     - `backup.scheduler.js`: Sao lưu SQL Server (`BACKUP DATABASE`) và tải lên Google Drive (chạy lúc 03:00 hàng ngày).
      - `upload-cleanup.scheduler.js`: Dọn dẹp tệp tin tạm phát sinh khi import/export quá 6h (chạy mỗi giờ một lần).
      - `account-purge.scheduler.js`: Xóa các tài khoản bị khóa vĩnh viễn >6 tháng chưa từng có lịch sử thi và audit log (chạy lúc 04:00 hàng ngày).
      - `abandoned-attempt.scheduler.js`: Tự động nộp bài và tính điểm cho các lượt thi `in_progress` bị bỏ rơi mất kết nối quá thời hạn `inactive_timeout` (quét định kỳ mỗi phút một lần).
