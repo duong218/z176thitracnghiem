@@ -70,24 +70,23 @@ async function generateAttemptQuestionSnapshot(query, attemptId, examCodeId) {
     answersByQuestion.set(k, list);
   }
 
-  const shuffledQIds = shuffle(questionIds);
-  for (let index = 0; index < shuffledQIds.length; index++) {
-    const qid = shuffledQIds[index];
-    const insAQ = await query(
-      `INSERT INTO attempt_questions (exam_attempt_id, question_id, order_index)
-       OUTPUT INSERTED.id
-       VALUES (@attemptId, @qid, @orderIndex)`,
-      { attemptId, qid, orderIndex: index }
+  // 2 câu lệnh cho cả đề (trước đây ~5 câu lệnh mỗi câu hỏi). OPENJSON: SQL Server 2016+, database compat level >= 130
+  const aqRes = await query(
+    `INSERT INTO attempt_questions (exam_attempt_id, question_id, order_index)
+     OUTPUT INSERTED.id, INSERTED.question_id
+     SELECT @attemptId, j.qid, j.o FROM OPENJSON(@json) WITH (qid UNIQUEIDENTIFIER '$.q', o INT '$.o') AS j`,
+    { attemptId, json: JSON.stringify(shuffle(questionIds).map((q, o) => ({ q, o }))) }
+  );
+  const aqaRows = [];
+  for (const r of aqRes.recordset) {
+    shuffle(answersByQuestion.get(String(r.question_id)) || []).forEach((a, o) => aqaRows.push({ aq: String(r.id), a, o }));
+  }
+  if (aqaRows.length > 0) {
+    await query(
+      `INSERT INTO attempt_question_answers (attempt_question_id, answer_id, order_index)
+       SELECT j.aq, j.a, j.o FROM OPENJSON(@json) WITH (aq UNIQUEIDENTIFIER '$.aq', a UNIQUEIDENTIFIER '$.a', o INT '$.o') AS j`,
+      { json: JSON.stringify(aqaRows) }
     );
-    const aqId = insAQ.recordset[0].id;
-    const shuffledAns = shuffle(answersByQuestion.get(qid) || []);
-    for (let aIdx = 0; aIdx < shuffledAns.length; aIdx++) {
-      await query(
-        `INSERT INTO attempt_question_answers (attempt_question_id, answer_id, order_index)
-         VALUES (@aqId, @ansId, @sortOrder)`,
-        { aqId, ansId: shuffledAns[aIdx], sortOrder: aIdx }
-      );
-    }
   }
 }
 
@@ -283,20 +282,20 @@ async function gradeAndSubmitAttempt({ attempt, exam, answersPayload, autoSubmit
     );
     await txQuery('DELETE FROM candidate_answers WHERE exam_attempt_id = @attemptId', { attemptId });
 
-    for (const item of gradedList) {
-      const insCA = await txQuery(
-        `INSERT INTO candidate_answers (exam_attempt_id, question_id, is_correct)
-         OUTPUT INSERTED.id
-         VALUES (@attemptId, @qid, @isCorrect)`,
-        { attemptId, qid: item.questionId, isCorrect: item.isCorrect ? 1 : 0 }
+    const caIns = await txQuery(
+      `INSERT INTO candidate_answers (exam_attempt_id, question_id, is_correct)
+       OUTPUT INSERTED.id, INSERTED.question_id
+       SELECT @attemptId, j.qid, j.ok FROM OPENJSON(@json) WITH (qid UNIQUEIDENTIFIER '$.q', ok BIT '$.ok') AS j`,
+      { attemptId, json: JSON.stringify(gradedList.map((g) => ({ q: g.questionId, ok: g.isCorrect ? 1 : 0 }))) }
+    );
+    const caIdByQ = new Map(caIns.recordset.map((r) => [gid(r.question_id), String(r.id)]));
+    const selRows = gradedList.flatMap((g) => g.selected.map((a) => ({ ca: caIdByQ.get(g.questionId), a })));
+    if (selRows.length > 0) {
+      await txQuery(
+        `INSERT INTO candidate_answer_selections (candidate_answer_id, answer_id)
+         SELECT j.ca, j.a FROM OPENJSON(@json) WITH (ca UNIQUEIDENTIFIER '$.ca', a UNIQUEIDENTIFIER '$.a') AS j`,
+        { json: JSON.stringify(selRows) }
       );
-      const caId = insCA.recordset[0].id;
-      for (const ansId of item.selected) {
-        await txQuery(
-          `INSERT INTO candidate_answer_selections (candidate_answer_id, answer_id) VALUES (@caId, @ansId)`,
-          { caId, ansId }
-        );
-      }
     }
 
     const insRes = await txQuery(

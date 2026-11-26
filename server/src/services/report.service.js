@@ -5,7 +5,7 @@
 
 import xlsx from 'xlsx';
 import ExcelJS from 'exceljs';
-import { query, mapRow, mapRows } from '../db/sql-helpers.js';
+import { query, mapRow } from '../db/sql-helpers.js';
 
 const HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF008BC5' } };
 const HEADER_FONT = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };

@@ -5,8 +5,8 @@
  */
 
 import crypto from 'node:crypto';
-import { query, withTransaction, mapRow, mapRows } from '../db/sql-helpers.js';
-import { EXAM_STATUS, QUESTION_SCOPE, QUESTION_USAGE } from '../models/constants.js';
+import { query, mapRow, mapRows } from '../db/sql-helpers.js';
+import { EXAM_STATUS } from '../models/constants.js';
 import { ApiError } from '../utils/api-error.js';
 import { notificationService } from './notification.service.js';
 

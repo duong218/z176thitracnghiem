@@ -10,7 +10,7 @@ import fs from 'fs';
 import XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { env } from '../config/env.js';
-import { query, withTransaction, mapRow, mapRows } from '../db/sql-helpers.js';
+import { query, mapRow, mapRows } from '../db/sql-helpers.js';
 import { ApiError } from '../utils/api-error.js';
 import * as auditService from './audit.service.js';
 import { assignEmployeeToActiveExamIfAny } from './exam-code-generation.service.js';

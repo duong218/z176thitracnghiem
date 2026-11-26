@@ -4,8 +4,8 @@
  * Kết quả luyện tập lưu riêng ở các bảng practice_sessions, practice_questions, v.v.
  */
 
-import { query, withTransaction, mapRow, mapRows } from '../db/sql-helpers.js';
-import { EXAM_STATUS, QUESTION_SCOPE, QUESTION_USAGE } from '../models/constants.js';
+import { query, mapRow } from '../db/sql-helpers.js';
+import { EXAM_STATUS } from '../models/constants.js';
 import { ApiError } from '../utils/api-error.js';
 
 const MAX_QUESTIONS = 30;

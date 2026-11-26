@@ -3,7 +3,7 @@
  * Tự động gửi thông báo theo các sự kiện: Nộp đề xuất thi, Phê duyệt/Từ chối, Công bố kỳ thi và Cảnh báo phát đề lỗi.
  */
 
-import { query, mapRow, mapRows } from '../db/sql-helpers.js';
+import { query, mapRow } from '../db/sql-helpers.js';
 
 function formatDateTime(date) {
   if (!date) return '';

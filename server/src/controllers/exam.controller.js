@@ -6,7 +6,6 @@
 import { examService } from '../services/exam.service.js';
 import { writeAudit } from '../services/audit.service.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { ApiError } from '../utils/api-error.js';
 
 function clientIp(req) {
   return req.ip ?? req.headers['x-forwarded-for']?.toString()?.split(',')[0]?.trim();

@@ -3,7 +3,7 @@
  * Hỗ trợ chuẩn hóa tên/mã phòng ban (slug), xử lý tìm kiếm không phân biệt hoa thường/dấu và tự động khôi phục dữ liệu import.
  */
 
-import { query, withTransaction, mapRow, mapRows } from '../db/sql-helpers.js';
+import { query, mapRow, mapRows } from '../db/sql-helpers.js';
 import { normalizeDeptName, normalizeDeptCode } from '../utils/normalize-dept.js';
 import { ApiError, assertFound } from '../utils/api-error.js';
 import { planImportDepartments } from '../utils/import-departments.js';

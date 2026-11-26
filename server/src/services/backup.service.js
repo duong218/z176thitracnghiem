@@ -12,7 +12,7 @@ import fssync from 'fs';
 import { google } from 'googleapis';
 import { env } from '../config/env.js';
 import { ApiError } from '../utils/api-error.js';
-import { sql, sqlPool, closeSqlPool } from '../db/sql-server.js';
+import { sql, sqlPool, closeSqlPool, openAdminPool, setDbMaintenance } from '../db/sql-server.js';
 
 const MAX_BACKUPS_KEPT = 5;
 const TMP_DIR = env.backupSqlDir ? path.resolve(env.backupSqlDir) : path.join(os.tmpdir(), 'z176-backups');
@@ -337,20 +337,9 @@ async function restoreFromLocalFile(localFilePath) {
     }
 
     const dbName = env.sqlServer.database.replace(/]/g, ']]');
+    setDbMaintenance(true); // /auth/me, cron... trả 503 thay vì mở lại kết nối chiếm SINGLE_USER
     await closeSqlPool();
-    masterPool = await step('Kết nối SQL Server (database master)', () =>
-      new sql.ConnectionPool({
-        server: env.sqlServer.host,
-        port: env.sqlServer.port,
-        database: 'master',
-        user: env.sqlServer.user,
-        password: env.sqlServer.password,
-        options: {
-          encrypt: env.sqlServer.encrypt,
-          trustServerCertificate: env.sqlServer.trustServerCertificate,
-        },
-      }).connect()
-    );
+    masterPool = await step('Kết nối SQL Server (database master)', () => openAdminPool());
 
     await step('Chuyển database sang chế độ một người dùng', () =>
       masterPool.request().query(`ALTER DATABASE [${dbName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE`)
@@ -366,6 +355,7 @@ async function restoreFromLocalFile(localFilePath) {
     }
   } finally {
     if (masterPool) await masterPool.close().catch(() => {});
+    setDbMaintenance(false);
     await sqlPool().catch(() => {});
     await cleanupLocalFile(decPath);
   }

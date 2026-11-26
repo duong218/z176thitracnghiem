@@ -50,6 +50,7 @@ export function createApp() {
   app.use('/api', apiRoutes);
 
   // --- Phục vụ client đã build (client/dist), GET không phải /api trả về index.html ---
+  app.use('/assets', express.static(path.join(CLIENT_DIST, 'assets'), { maxAge: '30d', immutable: true })); // Vite đặt hash trong tên file
   app.use(express.static(CLIENT_DIST));
   app.use((req, res, next) => {
     if (req.method !== 'GET' || req.path.startsWith('/api')) return next();
@@ -66,7 +67,7 @@ export function createApp() {
   });
 
   // --- Middleware tập trung xử lý lỗi toàn cục (Global Error Handler) ---
-  app.use((err, _req, res, _next) => {
+  app.use((err, req, res, _next) => {
     // SQL Server 8169: chuỗi không phải GUID (ID sai trên URL/body)
     if (err.number === 8169) {
       res.status(400).json({ success: false, message: 'Mã định danh không hợp lệ', code: 'INVALID_ID' });
@@ -78,6 +79,7 @@ export function createApp() {
       return;
     }
     const statusCode = err.statusCode ?? 500;
+    if (statusCode >= 500) console.error('[api]', req.method, req.originalUrl, err);
     const isApiError = err instanceof ApiError;
     const message =
       env.isProduction && !isApiError && statusCode === 500

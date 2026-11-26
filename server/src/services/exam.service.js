@@ -3,8 +3,8 @@
  * Xử lý: Đề xuất kỳ thi, Gửi duyệt, Phê duyệt/Từ chối, Xuất bản kỳ thi (Publish) và Lưu trữ (Archive).
  */
 
-import { query, withTransaction, mapRow, mapRows, toSnake } from '../db/sql-helpers.js';
-import { EXAM_STATUS, QUESTION_USAGE, ATTEMPT_TYPE, ATTEMPT_STATUS } from '../models/constants.js';
+import { query, withTransaction, mapRow, toSnake } from '../db/sql-helpers.js';
+import { EXAM_STATUS } from '../models/constants.js';
 import { ApiError } from '../utils/api-error.js';
 import {
   generateExamCodesAndAssignCandidates,

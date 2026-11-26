@@ -37,7 +37,10 @@ export async function sqlPool() {
       code: 'DB_MAINTENANCE',
     });
   }
-  if (!pool) pool = await sql.connect(config());
+  if (!pool) {
+    pool = await sql.connect(config());
+    pool.on('error', (err) => console.error('[db] pool error:', err.message)); // thiếu listener thì lỗi kết nối làm sập Node
+  }
   return pool;
 }
 

@@ -4,7 +4,7 @@
  */
 
 import fs from 'fs';
-import { query, mapRow, mapRows } from '../db/sql-helpers.js';
+import { query, mapRow } from '../db/sql-helpers.js';
 import { DOCUMENT_SCOPE } from '../models/constants.js';
 import { ApiError, assertFound } from '../utils/api-error.js';
 

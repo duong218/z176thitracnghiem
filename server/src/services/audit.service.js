@@ -3,7 +3,7 @@
  * Lưu vết hành động của người dùng và hỗ trợ truy vấn, tìm kiếm thông tin kiểm toán kèm hồ sơ nhân viên.
  */
 
-import { query, mapRow, mapRows } from '../db/sql-helpers.js';
+import { query } from '../db/sql-helpers.js';
 
 export const auditService = {
   // Ghi nhật ký thao tác

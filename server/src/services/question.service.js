@@ -19,7 +19,7 @@ import {
 } from '../models/constants.js';
 import { query, withTransaction, mapRow, mapRows } from '../db/sql-helpers.js';
 import { ApiError, assertFound } from '../utils/api-error.js';
-import { findDepartmentByCode, findOrCreateDepartmentByName, upsertDepartmentForImport } from './department.service.js';
+import { findDepartmentByCode, upsertDepartmentForImport } from './department.service.js';
 import { normalizeDeptName } from '../utils/normalize-dept.js';
 import { findOrCreateTopicByName } from './topic.service.js';
 import { env } from '../config/env.js';
