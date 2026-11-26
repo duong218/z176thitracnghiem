@@ -64,7 +64,7 @@ export async function withTransaction(callback) {
     await tx.commit();
     return result;
   } catch (err) {
-    await tx.rollback();
+    await tx.rollback().catch(() => {}); // không để lỗi rollback che mất lỗi gốc
     throw err;
   }
 }

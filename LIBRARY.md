@@ -40,17 +40,16 @@
 | Việc cần làm | Repo/Skill | Ghi chú |
 |---|---|---|
 | Chuẩn code Node.js/Express | https://github.com/goldbergyoni/nodebestpractices | Bộ best-practice được cite nhiều nhất — error handling, security, performance, testing. Dùng review code AI sinh ra. |
-| Boilerplate Express + Mongoose + JWT + role-based auth | https://github.com/hagopj13/node-express-boilerplate | Kiến trúc role-based khớp 3 role (Admin/Người ra đề/Thí sinh) của đề tài Z176. |
+| Boilerplate Express + JWT + role-based auth (mẫu dùng Mongoose, dự án này dùng SQL Server) | https://github.com/hagopj13/node-express-boilerplate | Kiến trúc role-based khớp 3 role (Admin/Người ra đề/Thí sinh) của đề tài Z176. |
 | Xây MCP server (nếu sau này cần AI agent tích hợp hệ thống) | https://officialskills.sh/anthropics/skills/mcp-builder | Chưa cần dùng ngay ở giai đoạn MVP. |
 
 ## 5. Database
 
 | Việc cần làm | Repo/Skill | Ghi chú |
 |---|---|---|
-| Thiết kế schema MongoDB (embed vs reference, 11 pattern) | officialskills.sh/mongodb/skills/mongodb-schema-design | Áp dụng khi thiết kế bảng câu hỏi/đề thi — quyết định embed câu hỏi trong đề hay reference riêng. |
-| Kết nối MongoDB | officialskills.sh/mongodb/skills/mongodb-connection | |
-| Tối ưu query chậm | officialskills.sh/mongodb/skills/mongodb-query-optimizer | Dùng khi dashboard thống kê (tỷ lệ đạt, điểm trung bình...) bị chậm. |
-| Sinh query từ ngôn ngữ tự nhiên | officialskills.sh/mongodb/skills/mongodb-natural-language-querying | Hỗ trợ debug nhanh khi kiểm tra dữ liệu test. |
+| Thiết kế schema SQL Server | `server/sql/schema.sql` (trong dự án) | Nguồn chuẩn cho bảng, khóa ngoại, ràng buộc. |
+| Kết nối SQL Server | https://github.com/tediousjs/node-mssql | Thư viện `mssql` đang dùng. |
+| Tối ưu query chậm | Execution Plan / Query Store của SQL Server | Dùng khi dashboard thống kê bị chậm. |
 
 ## 6. Bảo mật (ưu tiên cao nhất — đơn vị quân đội)
 
@@ -74,7 +73,7 @@
 | Việc cần làm | Repo/Skill | Ghi chú |
 |---|---|---|
 | Đo performance thực tế trên trình duyệt | officialskills.sh — "web performance measurement" (PerformanceAPI, mục testing/performance trong registry) | Đo thời gian tải trang thi — quan trọng nếu mạng khu sản xuất không ổn định (rủi ro #29 trong khảo sát). |
-| Tối ưu MongoDB query | Xem mục 5 — mongodb-query-optimizer | |
+| Tối ưu query SQL | Xem mục 5 | |
 | Deploy hạ tầng | https://officialskills.sh/openai/skills/netlify-deploy, `.../render-deploy` | Dùng cho bản demo nếu chưa deploy on-premise được. |
 
 ## 9. AI Tools / Workflow

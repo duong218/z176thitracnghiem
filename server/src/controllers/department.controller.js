@@ -9,7 +9,7 @@ import { writeAudit } from '../services/audit.service.js';
 import { ApiError } from '../utils/api-error.js';
 
 // Các mã lỗi chặn cứng khi ngừng sử dụng phòng ban (DEPARTMENT_HAS_ACTIVE_EMPLOYEES chỉ là cảnh báo cần xác nhận nên không ghi nhật ký chặn)
-const BLOCKING_DEPARTMENT_CODES = ['DEPARTMENT_HAS_ACTIVE_ATTEMPT', 'DEPARTMENT_IN_ACTIVE_EXAM'];
+const BLOCKING_DEPARTMENT_CODES = ['DEPARTMENT_HAS_IN_PROGRESS_ATTEMPTS', 'DEPARTMENT_HAS_ACTIVE_EXAM'];
 
 // Ghi nhật ký khi lần ngừng sử dụng phòng ban bị chặn cứng, rồi ném lại lỗi cho client.
 async function auditBlockedAndRethrow(err, req, id) {

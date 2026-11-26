@@ -26,8 +26,7 @@ async function runScheduledBackup() {
       actorUserId: null,
       action: 'BACKUP_AUTO_CREATE',
       resourceType: 'Backup',
-      resourceId: driveFile.id,
-      metadata: { fileName: driveFile.name, kept, deleted },
+      metadata: { driveFileId: driveFile.id, fileName: driveFile.name, kept, deleted },
     });
   } catch (err) {
     console.error('[backup-scheduler] Backup tự động thất bại:', err.message);

@@ -294,21 +294,45 @@ export async function getQuestionById(id) {
   return serializeQuestion(question, ansRes.recordset.map(mapRow));
 }
 
+// Giữ nguyên mã đáp án cũ khi sửa: bài đang thi / lịch sử thi tham chiếu answer_id
 async function replaceAnswers(questionId, answersInput) {
-  await query('DELETE FROM answers WHERE question_id = @questionId', { questionId });
-  for (let index = 0; index < answersInput.length; index++) {
-    const a = answersInput[index];
-    await query(
-      `INSERT INTO answers (question_id, content, is_correct, sort_order)
-       VALUES (@questionId, @content, @isCorrect, @sortOrder)`,
-      {
+  await withTransaction(async (txQuery) => {
+    const oldRes = await txQuery(
+      'SELECT id, content FROM answers WHERE question_id = @questionId ORDER BY sort_order ASC',
+      { questionId }
+    );
+    const unused = [...oldRes.recordset];
+    const take = (index) => (index >= 0 ? unused.splice(index, 1)[0].id : null);
+    // Ưu tiên khớp đúng nội dung, còn lại ghép theo thứ tự
+    const ids = answersInput.map((a) => take(unused.findIndex((o) => o.content === a.content.trim())));
+
+    for (let index = 0; index < answersInput.length; index++) {
+      const a = answersInput[index];
+      const id = ids[index] ?? take(unused.length ? 0 : -1);
+      const params = {
         questionId,
         content: a.content.trim(),
         isCorrect: Boolean(a.isCorrect) ? 1 : 0,
         sortOrder: a.sortOrder ?? index,
+      };
+      if (id) {
+        await txQuery(
+          `UPDATE answers SET content = @content, is_correct = @isCorrect, sort_order = @sortOrder, updated_at = SYSUTCDATETIME()
+           WHERE id = @id`,
+          { ...params, id }
+        );
+      } else {
+        await txQuery(
+          `INSERT INTO answers (question_id, content, is_correct, sort_order)
+           VALUES (@questionId, @content, @isCorrect, @sortOrder)`,
+          params
+        );
       }
-    );
-  }
+    }
+    for (const o of unused) {
+      await txQuery('DELETE FROM answers WHERE id = @id', { id: o.id });
+    }
+  });
 }
 
 export async function createQuestion(payload, createdBy) {
@@ -384,17 +408,17 @@ export async function updateQuestion(id, payload, actorUserId, ipAddress) {
 
   await query(
     `UPDATE questions
-     SET content = ISNULL(@content, content),
-         question_kind = ISNULL(@questionKind, question_kind),
-         answer_type = ISNULL(@answerType, answer_type),
-         difficulty = ISNULL(@difficulty, difficulty),
-         scope = ISNULL(@scope, scope),
-         topic_id = ISNULL(@topicId, topic_id),
+     SET content = COALESCE(@content, content),
+         question_kind = COALESCE(@questionKind, question_kind),
+         answer_type = COALESCE(@answerType, answer_type),
+         difficulty = COALESCE(@difficulty, difficulty),
+         scope = COALESCE(@scope, scope),
+         topic_id = COALESCE(@topicId, topic_id),
          department_id = @deptId,
          image_url = @imageUrl,
          image_cloudinary_id = @imageCloudinaryId,
-         usage = ISNULL(@usage, usage),
-         is_active = ISNULL(@isActive, is_active),
+         usage = COALESCE(@usage, usage),
+         is_active = COALESCE(@isActive, is_active),
          updated_at = SYSUTCDATETIME()
      WHERE id = @id`,
     {
@@ -455,6 +479,20 @@ export async function deactivateQuestion(id, actorUserId, ipAddress) {
   return { id: String(id), isActive: false };
 }
 
+const SQL_ID_CHUNK = 1000;
+
+// SQL Server giới hạn 2100 tham số mỗi câu lệnh -> chạy theo lô. buildSql nhận chuỗi "@id_0,@id_1,..."
+async function queryByIdChunks(ids, buildSql, extraParams = {}) {
+  const rows = [];
+  for (let start = 0; start < ids.length; start += SQL_ID_CHUNK) {
+    const chunk = ids.slice(start, start + SQL_ID_CHUNK);
+    const params = { ...extraParams, ...Object.fromEntries(chunk.map((id, i) => [`id_${i}`, id])) };
+    const res = await query(buildSql(chunk.map((_, i) => `@id_${i}`).join(',')), params);
+    rows.push(...(res.recordset ?? []));
+  }
+  return rows;
+}
+
 export async function moveQuestionsUsage({ ids, filters, targetUsage } = {}) {
   const target = parseUsage(targetUsage, { required: true });
   const source = target === QUESTION_USAGE.PRACTICE ? QUESTION_USAGE.EXAM : QUESTION_USAGE.PRACTICE;
@@ -463,11 +501,11 @@ export async function moveQuestionsUsage({ ids, filters, targetUsage } = {}) {
   if (Array.isArray(ids) && ids.length > 0) {
     const validIds = ids.filter(Boolean);
     if (!validIds.length) throw new ApiError(400, 'Danh sách ID không hợp lệ', 'QUESTION_BULK_MOVE_INVALID_IDS');
-    const inClauses = validIds.map((_, i) => `@id_${i}`);
-    const params = Object.fromEntries(validIds.map((id, i) => [`id_${i}`, id]));
-    params.source = source;
-    const res = await query(`SELECT id, topic_id FROM questions WHERE id IN (${inClauses.join(',')}) AND usage = @source AND is_active = 1`, params);
-    matched = mapRows(res.recordset);
+    matched = mapRows(await queryByIdChunks(
+      validIds,
+      (list) => `SELECT id, topic_id FROM questions WHERE id IN (${list}) AND usage = @source AND is_active = 1`,
+      { source },
+    ));
   } else if (filters && typeof filters === 'object') {
     const hasSpecific = ['topicId', 'scope', 'departmentId', 'questionKind', 'difficulty', 'answerType', 'search']
       .some((k) => filters[k] !== undefined && filters[k] !== null && filters[k] !== '');
@@ -498,10 +536,11 @@ export async function moveQuestionsUsage({ ids, filters, targetUsage } = {}) {
   }
 
   const idsToMove = matched.map((q) => q.id);
-  const inClauses = idsToMove.map((_, i) => `@id_${i}`);
-  const params = Object.fromEntries(idsToMove.map((id, i) => [`id_${i}`, id]));
-  params.target = target;
-  await query(`UPDATE questions SET usage = @target, updated_at = SYSUTCDATETIME() WHERE id IN (${inClauses.join(',')})`, params);
+  await queryByIdChunks(
+    idsToMove,
+    (list) => `UPDATE questions SET usage = @target, updated_at = SYSUTCDATETIME() WHERE id IN (${list})`,
+    { target },
+  );
 
   return {
     targetUsage: target,
@@ -515,10 +554,10 @@ export async function deactivateManyQuestions({ ids, filters } = {}, actorUserId
   if (Array.isArray(ids) && ids.length > 0) {
     const validIds = ids.filter(Boolean);
     if (!validIds.length) throw new ApiError(400, 'Danh sách ID không hợp lệ', 'QUESTION_BULK_DELETE_INVALID_IDS');
-    const inClauses = validIds.map((_, i) => `@id_${i}`);
-    const params = Object.fromEntries(validIds.map((id, i) => [`id_${i}`, id]));
-    const res = await query(`SELECT id, topic_id FROM questions WHERE id IN (${inClauses.join(',')}) AND is_active = 1`, params);
-    matched = mapRows(res.recordset);
+    matched = mapRows(await queryByIdChunks(
+      validIds,
+      (list) => `SELECT id, topic_id FROM questions WHERE id IN (${list}) AND is_active = 1`,
+    ));
   } else if (filters && typeof filters === 'object') {
     const hasSpecific = ['topicId', 'scope', 'departmentId', 'questionKind', 'difficulty', 'answerType', 'search']
       .some((k) => filters[k] !== undefined && filters[k] !== null && filters[k] !== '');
@@ -551,11 +590,10 @@ export async function deactivateManyQuestions({ ids, filters } = {}, actorUserId
     .filter((q) => !blockedTopicIds.has(String(q.topicId)))
     .map((q) => q.id);
 
-  if (idsToDeactivate.length > 0) {
-    const inClauses = idsToDeactivate.map((_, i) => `@id_${i}`);
-    const params = Object.fromEntries(idsToDeactivate.map((id, i) => [`id_${i}`, id]));
-    await query(`UPDATE questions SET is_active = 0, updated_at = SYSUTCDATETIME() WHERE id IN (${inClauses.join(',')})`, params);
-  }
+  await queryByIdChunks(
+    idsToDeactivate,
+    (list) => `UPDATE questions SET is_active = 0, updated_at = SYSUTCDATETIME() WHERE id IN (${list})`,
+  );
 
   return {
     deactivatedCount: idsToDeactivate.length,
@@ -1061,18 +1099,23 @@ export async function previewImportQuestionsFromWordFile(filePath, usage) {
       const payload = await buildQuestionFromImportRow(rows[i], m.questionNumber);
       const dedupeKey = buildDedupeKey(payload);
 
-      if (m.ambiguous || m.hasPartialUnderline) {
+      const duplicate = seenKeys.has(dedupeKey);
+      const needsCheck = m.ambiguous || m.hasPartialUnderline;
+      seenKeys.add(dedupeKey);
+      if (needsCheck) {
         needsReview.push({
           row: m.questionNumber,
           content: payload.content.slice(0, 120),
           options: m.options,
           suggestedCorrect: m.suggestedCorrect,
-          reason: m.ambiguous ? 'marking_mismatch' : 'partial_underline',
+          reasons: [m.ambiguous && 'minority', m.hasPartialUnderline && 'partialUnderline'].filter(Boolean),
+          duplicate,
         });
-      } else if (seenKeys.has(dedupeKey)) {
+      }
+      // Câu trùng (kể cả câu cần xác nhận) mặc định bị bỏ qua khi nhập -> phải hiện ở danh sách trùng
+      if (duplicate) {
         duplicates.push({ row: m.questionNumber, content: payload.content.slice(0, 120) });
-      } else {
-        seenKeys.add(dedupeKey);
+      } else if (!needsCheck) {
         ready.push({ row: m.questionNumber, content: payload.content.slice(0, 120) });
       }
     } catch (err) {
@@ -1104,7 +1147,8 @@ export async function previewImportQuestionsFromWordFile(filePath, usage) {
 }
 
 export async function confirmImportQuestionsFromWord(token, options, createdBy, actorUserId, ipAddress) {
-  const { keepDuplicateRows = [], overrides = {}, usage } = options ?? {};
+  const { keepDuplicateRows = [], correctOverrides, usage } = options ?? {};
+  const overrides = correctOverrides ?? {};
   const usageValue = parseUsage(usage, { required: true });
   const filePath = resolveImportTokenPath(token);
   if (!fs.existsSync(filePath)) {
@@ -1123,9 +1167,9 @@ export async function confirmImportQuestionsFromWord(token, options, createdBy, 
     const m = meta[i];
     const row = { ...rows[i] };
     const override = overrides[String(m.questionNumber)] ?? overrides[m.questionNumber];
-    if (override && Array.isArray(override.correctIndices) && override.correctIndices.length > 0) {
-      row.correct = override.correctIndices.join(',');
-      row.answertype = override.correctIndices.length > 1 ? 'multiple' : 'single';
+    if (Array.isArray(override) && override.length > 0) {
+      row.correct = override.join(',');
+      row.answertype = override.length > 1 ? 'multiple' : 'single';
     }
 
     try {

@@ -3,7 +3,7 @@
  * Xử lý: Đề xuất kỳ thi, Gửi duyệt, Phê duyệt/Từ chối, Xuất bản kỳ thi (Publish) và Lưu trữ (Archive).
  */
 
-import { query, withTransaction, mapRow, mapRows } from '../db/sql-helpers.js';
+import { query, withTransaction, mapRow, mapRows, toSnake } from '../db/sql-helpers.js';
 import { EXAM_STATUS, QUESTION_USAGE, ATTEMPT_TYPE, ATTEMPT_STATUS } from '../models/constants.js';
 import { ApiError } from '../utils/api-error.js';
 import {
@@ -91,8 +91,25 @@ async function parseDepartmentScopeFields(payload) {
   return { departmentScope: 'selected', allowedDepartmentIds };
 }
 
-function serializeExam(r, allowedDepts = []) {
-  if (!r) return null;
+// Kiểm tra trước để trả lỗi 400 dễ hiểu, thay vì để ràng buộc CHECK của SQL Server báo lỗi 500
+function assertExamFields({ title, duration, totalQ, commonQ, deptQ, passPercent }) {
+  const isInt = (v, min) => Number.isInteger(Number(v)) && v !== null && v !== '' && Number(v) >= min;
+  const fail = (message) => {
+    throw new ApiError(400, message, 'EXAM_FIELDS_INVALID');
+  };
+  if (typeof title !== 'string' || !title.trim()) fail('Vui lòng nhập tên kỳ thi.');
+  if (!isInt(duration, 1)) fail('Thời lượng thi phải là số nguyên lớn hơn 0.');
+  if (!isInt(totalQ, 1)) fail('Tổng số câu phải là số nguyên lớn hơn 0.');
+  if (!isInt(commonQ, 0) || !isInt(deptQ, 0)) fail('Số câu chung và câu riêng phải là số nguyên không âm.');
+  if (Number(totalQ) !== Number(commonQ) + Number(deptQ)) fail('Tổng số câu phải bằng số câu chung cộng số câu riêng.');
+  const pass = Number(passPercent);
+  if (!(pass >= 0 && pass <= 100)) fail('Ngưỡng đạt phải nằm trong khoảng 0 đến 100.');
+}
+
+function serializeExam(row, allowedDepts = []) {
+  if (!row) return null;
+  // Nhận cả dòng SQL thô (snake_case) lẫn object đã mapRow (camelCase)
+  const r = Object.fromEntries(Object.entries(row).map(([k, v]) => [toSnake(k), v]));
   return {
     _id: String(r.id),
     id: String(r.id),
@@ -102,8 +119,8 @@ function serializeExam(r, allowedDepts = []) {
       id: String(r.topic_id),
       name: r.topic_name,
     } : null,
-    startDate: r.startDate ?? r.start_date,
-    endDate: r.endDate ?? r.end_date,
+    startDate: r.start_date,
+    endDate: r.end_date,
     durationMinutes: r.duration_minutes,
     totalQuestions: r.total_questions,
     commonQuestionCount: r.common_question_count,
@@ -238,6 +255,15 @@ export const examService = {
       allowCommonCompensation,
     } = payload;
 
+    assertExamFields({
+      title,
+      duration: durationMinutes,
+      totalQ: totalQuestions,
+      commonQ: commonQuestionCount,
+      deptQ: departmentQuestionCount,
+      passPercent: passThresholdPercent ?? 70,
+    });
+
     const topicRes = await query('SELECT id, name FROM topics WHERE id = @id', { id: topicId });
     const topic = mapRow(topicRes.recordset[0]);
     if (!topic) throw new ApiError(404, 'Không tìm thấy chủ đề', 'TOPIC_NOT_FOUND');
@@ -318,9 +344,17 @@ export const examService = {
     }
 
     const nextTopicId = topicId || exam.topicId || exam.topic_id;
-    const nextCommonQ = commonQuestionCount !== undefined ? commonQuestionCount : exam.commonQuestionCount || exam.common_question_count;
-    const nextDeptQ = departmentQuestionCount !== undefined ? departmentQuestionCount : exam.departmentQuestionCount || exam.department_question_count;
+    const nextCommonQ = commonQuestionCount !== undefined ? commonQuestionCount : exam.commonQuestionCount;
+    const nextDeptQ = departmentQuestionCount !== undefined ? departmentQuestionCount : exam.departmentQuestionCount;
     const nextTotalQ = totalQuestions !== undefined ? totalQuestions : (nextCommonQ + nextDeptQ);
+    assertExamFields({
+      title: title ?? exam.title,
+      duration: durationMinutes ?? exam.durationMinutes,
+      totalQ: nextTotalQ,
+      commonQ: nextCommonQ,
+      deptQ: nextDeptQ,
+      passPercent: passThresholdPercent ?? exam.passThresholdPercent,
+    });
     const nextAllowComp = typeof allowCommonCompensation === 'boolean'
       ? allowCommonCompensation
       : Boolean(exam.allowCommonCompensation !== undefined ? exam.allowCommonCompensation : exam.allow_common_compensation);
@@ -334,6 +368,10 @@ export const examService = {
     } else if (payload.allowedDepartmentIds !== undefined && nextScope === 'selected') {
       const scopeFields = await parseDepartmentScopeFields({ ...payload, departmentScope: 'selected' });
       nextAllowedDeptIds = scopeFields.allowedDepartmentIds;
+    } else if (nextScope === 'selected') {
+      // Không gửi phạm vi: giữ nguyên danh sách phòng ban cũ
+      const oldRes = await query('SELECT department_id FROM exam_allowed_departments WHERE exam_id = @id', { id: examId });
+      nextAllowedDeptIds = oldRes.recordset.map((r) => String(r.department_id));
     }
 
     await assertScopeQuestionsSufficient({
@@ -353,13 +391,13 @@ export const examService = {
            updated_at = SYSUTCDATETIME()
        WHERE id = @id`,
       {
-        title: title?.trim(),
+        title: title?.trim() || exam.title,
         topicId: nextTopicId,
-        duration: durationMinutes,
+        duration: durationMinutes ?? exam.durationMinutes,
         totalQ: nextTotalQ,
         commonQ: nextCommonQ,
         deptQ: nextDeptQ,
-        passPercent: passThresholdPercent ?? 70,
+        passPercent: passThresholdPercent ?? exam.passThresholdPercent,
         allowComp: nextAllowComp ? 1 : 0,
         deptScope: nextScope,
         id: examId,
@@ -550,19 +588,20 @@ export const examService = {
 
       finalizedAttempts = await finalizeAttemptsForReplacedExams(impact.currentExams.map((e) => e.id));
 
-      await query(
-        `UPDATE exams SET status = '${EXAM_STATUS.ARCHIVED}', updated_at = SYSUTCDATETIME()
-         WHERE status = '${EXAM_STATUS.PUBLISHED}' AND id <> @id`,
-        { id: examId }
-      );
-
-      const pubRes = await query(
-        `UPDATE exams
-         SET status = '${EXAM_STATUS.PUBLISHED}', published_at = SYSUTCDATETIME(), publish_locked_at = NULL, updated_at = SYSUTCDATETIME()
-         OUTPUT INSERTED.*
-         WHERE id = @id`,
-        { id: examId }
-      );
+      const pubRes = await withTransaction(async (txQuery) => {
+        await txQuery(
+          `UPDATE exams SET status = '${EXAM_STATUS.ARCHIVED}', updated_at = SYSUTCDATETIME()
+           WHERE status = '${EXAM_STATUS.PUBLISHED}' AND id <> @id`,
+          { id: examId }
+        );
+        return txQuery(
+          `UPDATE exams
+           SET status = '${EXAM_STATUS.PUBLISHED}', published_at = SYSUTCDATETIME(), publish_locked_at = NULL, updated_at = SYSUTCDATETIME()
+           OUTPUT INSERTED.*
+           WHERE id = @id`,
+          { id: examId }
+        );
+      });
       published = mapRow(pubRes.recordset[0]);
     } catch (err) {
       await query('UPDATE exams SET publish_locked_at = NULL WHERE id = @id', { id: examId }).catch(() => {});

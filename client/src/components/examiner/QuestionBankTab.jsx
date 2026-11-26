@@ -930,6 +930,13 @@ export const QuestionBankTab = ({ initialFilter } = {}) => {
   const hasIncompleteIncludedDept = deptDrafts.some(
     (d) => d.include && (!d.code.trim() || !d.description.trim()),
   );
+  // Câu cần xác nhận lại vẫn được nhập (trừ câu trùng không được tick giữ) nên phải tính vào tổng
+  const reviewRows = importPreview?.needsReview ?? [];
+  const reviewCount = reviewRows.filter((r) => !r.duplicate).length;
+  const importCount = (importPreview?.readyCount ?? 0) + reviewCount + keepDupRows.length + includedDeptRowCount;
+  const hasUncheckedReview = reviewRows.some(
+    (r) => (!r.duplicate || keepDupRows.includes(r.row)) && !(reviewOverrides[r.row]?.length),
+  );
 
   const toggleKeepDupRow = (row) => {
     setKeepDupRows((prev) => (prev.includes(row) ? prev.filter((r) => r !== row) : [...prev, row]));
@@ -948,7 +955,11 @@ export const QuestionBankTab = ({ initialFilter } = {}) => {
     }
     // Bước xác nhận cuối: nói rõ số câu và ngân hàng đích, vì nhầm ngân hàng có thể làm lộ đề
     const targetUsage = importPreview.usage || importUsage;
-    const totalToImport = importPreview.readyCount + keepDupRows.length + includedDeptRowCount;
+    if (hasUncheckedReview) {
+      setError('Còn câu cần xác nhận chưa tick đáp án đúng nào. Vui lòng tick ít nhất 1 đáp án.');
+      return;
+    }
+    const totalToImport = importCount;
     const confirmed = await confirmAction(
       targetUsage === 'practice'
         ? `Bạn sắp thêm ${totalToImport} câu vào ngân hàng ÔN TẬP. Thí sinh sẽ thấy đáp án đúng khi luyện tập. Tiếp tục?`
@@ -2000,7 +2011,7 @@ D. Phương án đúng khác (hoặc GẠCH CHÂN cả dòng)`}</pre>
                   <div className="text-sm text-slate-500">{importFileKind === 'word' ? 'Tổng số câu' : 'Tổng số dòng'}</div>
                 </div>
                 <div className="bg-[#F0FDF4] rounded-lg p-3">
-                  <div className="text-xl font-bold text-[#22C55E]">{importPreview.readyCount}</div>
+                  <div className="text-xl font-bold text-[#22C55E]">{(importPreview.readyCount ?? 0) + reviewCount}</div>
                   <div className="text-sm text-slate-500">Sẵn sàng thêm</div>
                 </div>
                 <div className="bg-[#FFF7ED] rounded-lg p-3">
@@ -2114,6 +2125,9 @@ D. Phương án đúng khác (hoặc GẠCH CHÂN cả dòng)`}</pre>
                               .join(' · ')}
                           </p>
                         )}
+                        {(reviewOverrides[r.row] || []).length === 0 && (!r.duplicate || keepDupRows.includes(r.row)) && (
+                          <p className="pl-14 text-[11px] text-red-600">Chưa chọn đáp án đúng.</p>
+                        )}
                         <div className="flex flex-wrap gap-2 pl-14">
                           {r.options.map((o) => (
                             <label
@@ -2132,7 +2146,7 @@ D. Phương án đúng khác (hoặc GẠCH CHÂN cả dòng)`}</pre>
                                 className="w-3.5 h-3.5"
                               />
                               {o.letter}. {o.content.slice(0, 40)}
-                              {o.partialUnderline && <span className="text-amber-600 font-normal">(gạch chân một phần)</span>}
+                              {o.underlinePartial && <span className="text-amber-600 font-normal">(gạch chân một phần)</span>}
                             </label>
                           ))}
                         </div>
@@ -2196,12 +2210,13 @@ D. Phương án đúng khác (hoặc GẠCH CHÂN cả dòng)`}</pre>
                   disabled={
                     importConfirming ||
                     hasIncompleteIncludedDept ||
-                    importPreview.readyCount + keepDupRows.length + includedDeptRowCount === 0
+                    importCount === 0 ||
+                    hasUncheckedReview
                   }
                   className="flex-1 py-2.5 bg-[#008BC5] text-white rounded-lg font-semibold hover:bg-[#007ba1] transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {importConfirming ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                  Xác nhận nhập ({importPreview.readyCount + keepDupRows.length + includedDeptRowCount} câu)
+                  Xác nhận nhập ({importCount} câu)
                 </button>
               </div>
             </div>

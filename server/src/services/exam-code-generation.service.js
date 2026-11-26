@@ -59,7 +59,18 @@ export function isDepartmentInScope(exam, departmentId) {
   return ids.has(String(departmentId));
 }
 
+// Object exam đọc bằng "SELECT * FROM exams" không có danh sách phòng được thi -> nạp từ bảng liên kết
+async function ensureAllowedDepartments(exam) {
+  if ((exam.departmentScope || exam.department_scope) !== 'selected') return;
+  if (exam.allowedDepartmentIds || exam.allowed_department_ids) return;
+  const res = await query('SELECT department_id FROM exam_allowed_departments WHERE exam_id = @id', {
+    id: exam.id || exam._id,
+  });
+  exam.allowedDepartmentIds = res.recordset.map((r) => String(r.department_id));
+}
+
 async function resolveDepartmentEligibility(exam, departmentId) {
+  await ensureAllowedDepartments(exam);
   const inScope = isDepartmentInScope(exam, departmentId);
   const topicId = exam.topicId || exam.topic_id;
   const countRes = await query(
@@ -81,6 +92,7 @@ async function resolveDepartmentEligibility(exam, departmentId) {
 
 async function validateQuestionAvailability(exam, department, { extraOnly = false } = {}) {
   const deptId = department.id || department._id;
+  await ensureAllowedDepartments(exam);
   const inScope = isDepartmentInScope(exam, deptId);
   const requiredDeptQuestions = exam.departmentQuestionCount ?? exam.department_question_count ?? 0;
   const topicId = exam.topicId || exam.topic_id;

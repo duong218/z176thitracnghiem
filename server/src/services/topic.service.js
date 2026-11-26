@@ -52,7 +52,7 @@ export async function createTopic({ name, description }) {
     if (!existing.isActive) {
       const updated = await query(
         `UPDATE topics 
-         SET is_active = 1, description = ISNULL(@description, description), updated_at = SYSUTCDATETIME()
+         SET is_active = 1, description = COALESCE(@description, description), updated_at = SYSUTCDATETIME()
          OUTPUT INSERTED.* WHERE id = @id`,
         { id: existing.id, description: description !== undefined ? (description?.trim() || '') : null }
       );

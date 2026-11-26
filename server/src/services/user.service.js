@@ -182,7 +182,7 @@ async function reactivateLockedAccount({
     const empRes = await query(
       `UPDATE employees
        SET fullname = @fullname, department_id = @departmentId,
-           employee_code = ISNULL(@employeeCode, employee_code),
+           employee_code = COALESCE(@employeeCode, employee_code),
            dob = @dob, gender = @gender, phone = @phone, address = @address, position = @position,
            is_active = 1, updated_at = SYSUTCDATETIME()
        OUTPUT INSERTED.* WHERE id = @id`,
@@ -247,6 +247,7 @@ async function reactivateLockedAccount({
     ipAddress,
   });
 
+  delete existingUser.passwordHash;
   return { user: existingUser, tempPassword, employee };
 }
 
@@ -429,6 +430,7 @@ export async function updateUserRole({ adminId, userId, newRoleId, ipAddress }) 
     }
   }
 
+  delete user.passwordHash;
   return { ...user, roleId: newRoleId };
 }
 
@@ -535,6 +537,7 @@ export async function toggleUserLock({ adminId, userId, isActive, ipAddress }) {
     }
   );
 
+  delete user.passwordHash;
   return { ...user, isActive };
 }
 
@@ -553,7 +556,7 @@ export async function resetUserPassword({ adminId, userId, ipAddress }) {
     { passwordHash, id: userId }
   );
 
-  return { tempPassword };
+  return { tempPassword, user: { username: user.username } };
 }
 
 // Xuất file Excel danh sách thông tin đăng nhập của Thí sinh
@@ -997,7 +1000,7 @@ export async function confirmEmployeeImportRows(rows, adminId, ipAddress, { depa
         if (existingEmployee) {
           await query(
             `UPDATE employees
-             SET fullname = @fullname, department_id = @deptId, employee_code = ISNULL(@code, employee_code),
+             SET fullname = @fullname, department_id = @deptId, employee_code = COALESCE(@code, employee_code),
                  dob = @dob, gender = @gender, phone = @phone, address = @address, position = @position, updated_at = SYSUTCDATETIME()
              WHERE id = @id`,
             {

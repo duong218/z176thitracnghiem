@@ -21,6 +21,7 @@ import {
 const MAX_OFFICIAL_ATTEMPTS = 1;
 const INACTIVITY_TIMEOUT_MS = 60_000;
 const ABANDONED_ATTEMPT_WINDOW_MS = 2 * 60_000;
+const SUBMIT_GRACE_MS = 30_000; // nộp trễ hơn hạn quá mức này: chỉ chấm đáp án đã lưu
 const EXAM_REPLACED_MESSAGE =
   'Người duyệt đề vừa đăng một kỳ thi mới nên kỳ thi này đã kết thúc. Hệ thống đã tự động nộp bài với các đáp án bạn đã chọn.';
 
@@ -37,7 +38,16 @@ function shuffle(arr) {
   return result;
 }
 
-async function generateAttemptQuestionSnapshot(attemptId, examCodeId) {
+// Mã GUID: SQL Server trả chữ HOA, client có thể gửi chữ thường -> chuẩn hóa khi so sánh
+const gid = (v) => String(v).toUpperCase();
+
+// Bỏ đáp án trùng hoặc không thuộc câu hỏi của lượt thi (tránh lỗi khóa chính / chuyển kiểu)
+function pickValidAnswerIds(selected, allowed) {
+  if (!Array.isArray(selected)) return [];
+  return [...new Set(selected.map(gid))].filter((id) => allowed?.has(id));
+}
+
+async function generateAttemptQuestionSnapshot(query, attemptId, examCodeId) {
   const ecqRes = await query(
     'SELECT question_id FROM exam_code_questions WHERE exam_code_id = @codeId ORDER BY order_index ASC',
     { codeId: examCodeId }
@@ -184,127 +194,119 @@ function toResultPayload(result, autoSubmitReason = null) {
 
 async function gradeAndSubmitAttempt({ attempt, exam, answersPayload, autoSubmitReason = null }) {
   const attemptId = attempt.id || attempt._id;
-  const existingRes = await query('SELECT * FROM results WHERE exam_attempt_id = @attemptId', { attemptId });
-  if (existingRes.recordset.length > 0) {
-    const latestAttemptRes = await query('SELECT auto_submit_reason FROM exam_attempts WHERE id = @attemptId', { attemptId });
-    return toResultPayload(mapRow(existingRes.recordset[0]), latestAttemptRes.recordset[0]?.auto_submit_reason);
-  }
+  const expiresAt = attempt.expiresAt || attempt.expires_at;
+  const isLate = expiresAt && Date.now() > new Date(expiresAt).getTime() + SUBMIT_GRACE_MS;
 
-  const aqRes = await query(
-    'SELECT id, question_id FROM attempt_questions WHERE exam_attempt_id = @attemptId',
-    { attemptId }
-  );
-  const questionIds = aqRes.recordset.map((r) => String(r.question_id));
-
-  let correctByQuestion = new Map();
-  if (questionIds.length > 0) {
-    const inClauses = questionIds.map((_, i) => `@q_${i}`);
-    const qParams = Object.fromEntries(questionIds.map((id, i) => [`q_${i}`, id]));
-    const corRes = await query(
-      `SELECT id, question_id FROM answers WHERE question_id IN (${inClauses.join(',')}) AND is_correct = 1`,
-      qParams
+  // Tất cả trong 1 transaction: lỗi giữa chừng thì lượt thi vẫn nộp lại được, không bị "đã nộp mà không có điểm"
+  return withTransaction(async (txQuery) => {
+    // Giành quyền nộp trước (khóa dòng lượt thi đến khi commit)
+    const claimRes = await txQuery(
+      `UPDATE exam_attempts
+       SET status = 'submitted', submitted_at = SYSUTCDATETIME(), auto_submit_reason = @reason, updated_at = SYSUTCDATETIME()
+       OUTPUT INSERTED.*
+       WHERE id = @attemptId AND status IN ('in_progress', 'expired')
+         AND NOT EXISTS (SELECT 1 FROM results WHERE exam_attempt_id = @attemptId)`,
+      { attemptId, reason: autoSubmitReason || null }
     );
-    for (const a of corRes.recordset) {
-      const k = String(a.question_id);
-      const s = correctByQuestion.get(k) ?? new Set();
-      s.add(String(a.id));
-      correctByQuestion.set(k, s);
+    const claimed = mapRow(claimRes.recordset[0]);
+    if (!claimed) {
+      const resRow = await txQuery(
+        `SELECT r.*, ea.auto_submit_reason FROM results r
+         JOIN exam_attempts ea ON ea.id = r.exam_attempt_id
+         WHERE r.exam_attempt_id = @attemptId`,
+        { attemptId }
+      );
+      if (resRow.recordset.length > 0) {
+        return toResultPayload(mapRow(resRow.recordset[0]), resRow.recordset[0].auto_submit_reason);
+      }
+      throw new ApiError(400, 'Lượt thi không ở trạng thái hợp lệ để nộp bài', 'ATTEMPT_INVALID_STATUS');
     }
-  }
 
-  const answersMap = new Map();
-  if (Array.isArray(answersPayload)) {
-    for (const item of answersPayload) {
-      if (!item?.questionId) continue;
-      const selected = Array.isArray(item.selectedAnswerIds) ? item.selectedAnswerIds.map(String) : [];
-      answersMap.set(String(item.questionId), selected);
+    // Câu hỏi + các đáp án hợp lệ của lượt thi
+    const aqRes = await txQuery(
+      `SELECT aq.question_id, aqa.answer_id, a.is_correct
+       FROM attempt_questions aq
+       LEFT JOIN attempt_question_answers aqa ON aqa.attempt_question_id = aq.id
+       LEFT JOIN answers a ON a.id = aqa.answer_id
+       WHERE aq.exam_attempt_id = @attemptId`,
+      { attemptId }
+    );
+    const questions = new Map(); // questionId -> { allowed, correct }
+    for (const row of aqRes.recordset) {
+      const qid = gid(row.question_id);
+      const q = questions.get(qid) ?? { allowed: new Set(), correct: new Set() };
+      if (row.answer_id) q.allowed.add(gid(row.answer_id));
+      if (row.is_correct) q.correct.add(gid(row.answer_id));
+      questions.set(qid, q);
     }
-  } else {
-    const caRes = await query(
-      `SELECT ca.id, ca.question_id, cas.answer_id
+
+    // Đáp án đã autosave, sau đó đáp án gửi kèm lúc nộp ghi đè (chỉ khi còn trong hạn)
+    const answersMap = new Map();
+    const caRes = await txQuery(
+      `SELECT ca.question_id, cas.answer_id
        FROM candidate_answers ca
-       LEFT JOIN candidate_answer_selections cas ON cas.candidate_answer_id = ca.id
+       JOIN candidate_answer_selections cas ON cas.candidate_answer_id = ca.id
        WHERE ca.exam_attempt_id = @attemptId`,
       { attemptId }
     );
     for (const row of caRes.recordset) {
-      const qk = String(row.question_id);
-      const list = answersMap.get(qk) ?? [];
-      if (row.answer_id) list.push(String(row.answer_id));
-      answersMap.set(qk, list);
+      const qid = gid(row.question_id);
+      answersMap.set(qid, [...(answersMap.get(qid) ?? []), gid(row.answer_id)]);
     }
-  }
-
-  let correctCount = 0;
-  const gradedList = [];
-  for (const row of aqRes.recordset) {
-    const qid = String(row.question_id);
-    const selected = answersMap.get(qid) || [];
-    const selectedSet = new Set(selected);
-    const correctSet = correctByQuestion.get(qid) || new Set();
-    const isCorrect = selectedSet.size === correctSet.size && [...selectedSet].every((id) => correctSet.has(id));
-    if (isCorrect) correctCount += 1;
-    gradedList.push({ questionId: qid, selected, isCorrect });
-  }
-
-  const totalQuestions = aqRes.recordset.length;
-  const score = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0;
-  const passPercent = exam.passThresholdPercent ?? exam.pass_threshold_percent ?? 70;
-  const passed = score >= passPercent;
-
-  const claimRes = await query(
-    `UPDATE exam_attempts
-     SET status = 'submitted', submitted_at = SYSUTCDATETIME(), auto_submit_reason = @reason, updated_at = SYSUTCDATETIME()
-     OUTPUT INSERTED.*
-     WHERE id = @attemptId AND status IN ('in_progress', 'expired')`,
-    { attemptId, reason: autoSubmitReason || null }
-  );
-  const claimed = mapRow(claimRes.recordset[0]);
-  if (!claimed) {
-    const resRow = await query('SELECT * FROM results WHERE exam_attempt_id = @attemptId', { attemptId });
-    if (resRow.recordset.length > 0) {
-      return toResultPayload(mapRow(resRow.recordset[0]), autoSubmitReason);
+    if (Array.isArray(answersPayload) && !isLate) {
+      for (const item of answersPayload) {
+        if (item?.questionId) answersMap.set(gid(item.questionId), item.selectedAnswerIds);
+      }
     }
-    throw new ApiError(400, 'Lượt thi không ở trạng thái hợp lệ để nộp bài', 'ATTEMPT_INVALID_STATUS');
-  }
 
-  // Lưu đáp án thí sinh
-  await query(
-    `DELETE FROM candidate_answer_selections WHERE candidate_answer_id IN (SELECT id FROM candidate_answers WHERE exam_attempt_id = @attemptId)`,
-    { attemptId }
-  );
-  await query('DELETE FROM candidate_answers WHERE exam_attempt_id = @attemptId', { attemptId });
+    let correctCount = 0;
+    const gradedList = [];
+    for (const [qid, { allowed, correct }] of questions) {
+      const selected = pickValidAnswerIds(answersMap.get(qid), allowed);
+      const isCorrect = correct.size > 0 && selected.length === correct.size && selected.every((id) => correct.has(id));
+      if (isCorrect) correctCount += 1;
+      gradedList.push({ questionId: qid, selected, isCorrect });
+    }
 
-  for (const item of gradedList) {
-    const insCA = await query(
-      `INSERT INTO candidate_answers (exam_attempt_id, question_id, is_correct)
-       OUTPUT INSERTED.id
-       VALUES (@attemptId, @qid, @isCorrect)`,
-      { attemptId, qid: item.questionId, isCorrect: item.isCorrect ? 1 : 0 }
+    const totalQuestions = gradedList.length;
+    if (totalQuestions === 0) {
+      throw new ApiError(500, 'Lượt thi không có câu hỏi, vui lòng báo người quản trị.', 'ATTEMPT_NO_QUESTIONS');
+    }
+    const score = Math.round((correctCount / totalQuestions) * 100);
+    const passPercent = exam.passThresholdPercent ?? exam.pass_threshold_percent ?? 70;
+    const passed = score >= passPercent;
+
+    // Lưu đáp án thí sinh
+    await txQuery(
+      `DELETE FROM candidate_answer_selections WHERE candidate_answer_id IN (SELECT id FROM candidate_answers WHERE exam_attempt_id = @attemptId)`,
+      { attemptId }
     );
-    const caId = insCA.recordset[0].id;
-    for (const ansId of item.selected) {
-      await query(
-        `INSERT INTO candidate_answer_selections (candidate_answer_id, answer_id) VALUES (@caId, @ansId)`,
-        { caId, ansId }
-      );
-    }
-  }
+    await txQuery('DELETE FROM candidate_answers WHERE exam_attempt_id = @attemptId', { attemptId });
 
-  const insRes = await query(
-    `INSERT INTO results (exam_attempt_id, score, correct_count, total_questions, passed)
-     OUTPUT INSERTED.*
-     VALUES (@attemptId, @score, @correctCount, @totalQ, @passed)`,
-    {
-      attemptId,
-      score,
-      correctCount,
-      totalQ: totalQuestions,
-      passed: passed ? 1 : 0,
+    for (const item of gradedList) {
+      const insCA = await txQuery(
+        `INSERT INTO candidate_answers (exam_attempt_id, question_id, is_correct)
+         OUTPUT INSERTED.id
+         VALUES (@attemptId, @qid, @isCorrect)`,
+        { attemptId, qid: item.questionId, isCorrect: item.isCorrect ? 1 : 0 }
+      );
+      const caId = insCA.recordset[0].id;
+      for (const ansId of item.selected) {
+        await txQuery(
+          `INSERT INTO candidate_answer_selections (candidate_answer_id, answer_id) VALUES (@caId, @ansId)`,
+          { caId, ansId }
+        );
+      }
     }
-  );
-  const result = mapRow(insRes.recordset[0]);
-  return toResultPayload(result, claimed.auto_submit_reason || claimed.autoSubmitReason);
+
+    const insRes = await txQuery(
+      `INSERT INTO results (exam_attempt_id, score, correct_count, total_questions, passed)
+       OUTPUT INSERTED.*
+       VALUES (@attemptId, @score, @correctCount, @totalQ, @passed)`,
+      { attemptId, score, correctCount, totalQ: totalQuestions, passed: passed ? 1 : 0 }
+    );
+    return toResultPayload(mapRow(insRes.recordset[0]), claimed.autoSubmitReason);
+  });
 }
 
 async function finalizeIfExamReplaced(attempt, exam) {
@@ -595,20 +597,28 @@ export const examAttemptService = {
     const startedAt = new Date();
     const expiresAt = new Date(startedAt.getTime() + duration * 60_000);
 
-    const insAtt = await query(
-      `INSERT INTO exam_attempts (exam_candidate_id, attempt_type, department_id, started_at, expires_at, status, last_active_at)
-       OUTPUT INSERTED.*
-       VALUES (@candId, '${ATTEMPT_TYPE.OFFICIAL}', @deptId, @startedAt, @expiresAt, '${ATTEMPT_STATUS.IN_PROGRESS}', @startedAt)`,
-      {
-        candId: examCandidate.id,
-        deptId: finalDeptId || null,
-        startedAt,
-        expiresAt,
+    const attempt = await withTransaction(async (txQuery) => {
+      const insAtt = await txQuery(
+        `INSERT INTO exam_attempts (exam_candidate_id, attempt_type, department_id, started_at, expires_at, status, last_active_at)
+         OUTPUT INSERTED.*
+         VALUES (@candId, '${ATTEMPT_TYPE.OFFICIAL}', @deptId, @startedAt, @expiresAt, '${ATTEMPT_STATUS.IN_PROGRESS}', @startedAt)`,
+        {
+          candId: examCandidate.id,
+          deptId: finalDeptId || null,
+          startedAt,
+          expiresAt,
+        }
+      );
+      const created = mapRow(insAtt.recordset[0]);
+      await generateAttemptQuestionSnapshot(txQuery, created.id, finalCodeId);
+      return created;
+    }).catch((err) => {
+      // Bấm "Bắt đầu" 2 lần cùng lúc: chỉ mục duy nhất chặn lượt thứ hai
+      if (err.number === 2601 || err.number === 2627) {
+        throw new ApiError(409, 'Lượt thi vừa được tạo, vui lòng bấm lại để tiếp tục làm bài.', 'ATTEMPT_ALREADY_STARTED');
       }
-    );
-    const attempt = mapRow(insAtt.recordset[0]);
-
-    await generateAttemptQuestionSnapshot(attempt.id, finalCodeId);
+      throw err;
+    });
 
     return {
       attemptId: String(attempt.id),
@@ -634,37 +644,58 @@ export const examAttemptService = {
       throw new ApiError(400, 'Lượt thi không còn ở trạng thái đang làm bài', 'ATTEMPT_INVALID_STATUS');
     }
 
-    const existingRes = await query(
-      'SELECT id FROM candidate_answers WHERE exam_attempt_id = @attemptId AND question_id = @qid',
-      { attemptId, qid: questionId }
-    );
-    let caId;
-    if (existingRes.recordset.length > 0) {
-      caId = existingRes.recordset[0].id;
-      await query('DELETE FROM candidate_answer_selections WHERE candidate_answer_id = @caId', { caId });
-    } else {
-      const insCA = await query(
-        `INSERT INTO candidate_answers (exam_attempt_id, question_id, is_correct)
-         OUTPUT INSERTED.id VALUES (@attemptId, @qid, 0)`,
+    const savedAt = await withTransaction(async (txQuery) => {
+      // Khóa dòng lượt thi: các lần autosave / nộp bài chạy lần lượt, không chèn trùng
+      const lockRes = await txQuery(
+        'SELECT status FROM exam_attempts WITH (UPDLOCK, ROWLOCK) WHERE id = @attemptId',
+        { attemptId }
+      );
+      if (lockRes.recordset[0]?.status !== ATTEMPT_STATUS.IN_PROGRESS) {
+        throw new ApiError(400, 'Lượt thi không còn ở trạng thái đang làm bài', 'ATTEMPT_INVALID_STATUS');
+      }
+
+      const optRes = await txQuery(
+        `SELECT aqa.answer_id FROM attempt_questions aq
+         LEFT JOIN attempt_question_answers aqa ON aqa.attempt_question_id = aq.id
+         WHERE aq.exam_attempt_id = @attemptId AND aq.question_id = @qid`,
         { attemptId, qid: questionId }
       );
-      caId = insCA.recordset[0].id;
-    }
+      if (optRes.recordset.length === 0) {
+        throw new ApiError(400, 'Câu hỏi không thuộc lượt thi này', 'QUESTION_NOT_IN_ATTEMPT');
+      }
+      const allowed = new Set(optRes.recordset.filter((r) => r.answer_id).map((r) => gid(r.answer_id)));
 
-    const answers = Array.isArray(selectedAnswerIds) ? selectedAnswerIds : [];
-    for (const ansId of answers) {
-      await query('INSERT INTO candidate_answer_selections (candidate_answer_id, answer_id) VALUES (@caId, @ansId)', {
-        caId,
-        ansId,
-      });
-    }
+      const existingRes = await txQuery(
+        'SELECT id FROM candidate_answers WHERE exam_attempt_id = @attemptId AND question_id = @qid',
+        { attemptId, qid: questionId }
+      );
+      let caId = existingRes.recordset[0]?.id;
+      if (caId) {
+        await txQuery('DELETE FROM candidate_answer_selections WHERE candidate_answer_id = @caId', { caId });
+      } else {
+        const insCA = await txQuery(
+          `INSERT INTO candidate_answers (exam_attempt_id, question_id, is_correct)
+           OUTPUT INSERTED.id VALUES (@attemptId, @qid, 0)`,
+          { attemptId, qid: questionId }
+        );
+        caId = insCA.recordset[0].id;
+      }
 
-    const upd = await query(
-      `UPDATE exam_attempts SET last_active_at = SYSUTCDATETIME() OUTPUT INSERTED.last_active_at WHERE id = @id`,
-      { id: attemptId }
-    );
+      for (const ansId of pickValidAnswerIds(selectedAnswerIds, allowed)) {
+        await txQuery('INSERT INTO candidate_answer_selections (candidate_answer_id, answer_id) VALUES (@caId, @ansId)', {
+          caId,
+          ansId,
+        });
+      }
 
-    return { attemptId, savedAt: upd.recordset[0]?.last_active_at };
+      const upd = await txQuery(
+        `UPDATE exam_attempts SET last_active_at = SYSUTCDATETIME() OUTPUT INSERTED.last_active_at WHERE id = @attemptId`,
+        { attemptId }
+      );
+      return upd.recordset[0]?.last_active_at;
+    });
+
+    return { attemptId, savedAt };
   },
 
   async heartbeat(userId, attemptId) {
@@ -816,6 +847,14 @@ export const examAttemptService = {
   },
 };
 
+// Lượt bị bỏ rơi: còn "đang làm" nhưng im lặng/quá giờ, hoặc đã "expired" mà chưa được chấm
+function abandonedClause(windowParam) {
+  const limit = `DATEADD(millisecond, -${windowParam}, SYSUTCDATETIME())`;
+  return `((ea.status = 'in_progress' AND (ea.last_active_at < ${limit} OR ea.expires_at < ${limit}))
+    OR (ea.status = 'expired' AND ea.expires_at < ${limit}
+        AND NOT EXISTS (SELECT 1 FROM results r WHERE r.exam_attempt_id = ea.id)))`;
+}
+
 async function finalizeInProgressAttempts(examIds, autoSubmitReason, attemptFilter = {}) {
   if (!examIds?.length) return { finalized: 0, failed: 0 };
 
@@ -825,11 +864,12 @@ async function finalizeInProgressAttempts(examIds, autoSubmitReason, attemptFilt
   const examsRes = await query(`SELECT * FROM exams WHERE id IN (${inClauses.join(',')})`, eParams);
   const examById = new Map(examsRes.recordset.map((e) => [String(e.id), mapRow(e)]));
 
-  let where = `WHERE ec.exam_id IN (${inClauses.join(',')}) AND ea.attempt_type = 'official' AND ea.status = 'in_progress'`;
+  let statusClause = `ea.status = 'in_progress'`;
   if (attemptFilter.abandoned) {
-    where += ` AND (ea.last_active_at < DATEADD(millisecond, -@window, SYSUTCDATETIME()) OR ea.expires_at < DATEADD(millisecond, -@window, SYSUTCDATETIME()))`;
+    statusClause = abandonedClause('@window');
     eParams.window = ABANDONED_ATTEMPT_WINDOW_MS;
   }
+  const where = `WHERE ec.exam_id IN (${inClauses.join(',')}) AND ea.attempt_type = 'official' AND ${statusClause}`;
 
   const attRes = await query(
     `SELECT ea.*, ec.exam_id
@@ -870,8 +910,7 @@ export async function finalizeAbandonedAttempts() {
   const expiredCandRes = await query(
     `SELECT DISTINCT ec.exam_id FROM exam_attempts ea
      JOIN exam_candidates ec ON ea.exam_candidate_id = ec.id
-     WHERE ea.attempt_type = 'official' AND ea.status = 'in_progress'
-       AND (ea.last_active_at < DATEADD(millisecond, -@w, SYSUTCDATETIME()) OR ea.expires_at < DATEADD(millisecond, -@w, SYSUTCDATETIME()))`,
+     WHERE ea.attempt_type = 'official' AND ${abandonedClause('@w')}`,
     { w: ABANDONED_ATTEMPT_WINDOW_MS }
   );
   const examIds = expiredCandRes.recordset.map((r) => String(r.exam_id));

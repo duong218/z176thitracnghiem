@@ -6,11 +6,11 @@ Tài liệu này tổng hợp các tình huống ngoại lệ (edge cases) mà h
 
 ## PHẦN A — TÌNH HUỐNG NGOẠI LỆ ĐÃ KHẮC PHỤC
 
-### A1. Trùng lặp ngẫu nhiên mã đề khi tạo ExamCode (Retry E11000)
+### A1. Trùng lặp ngẫu nhiên mã đề khi tạo ExamCode (Retry khi trùng khóa)
 
-**Tình huống:** Hàm `buildExamCode` sinh mã đề có hậu tố ngẫu nhiên (ví dụ `D3F9A1-XUONG1-NV001-A8F1`). Trong trường hợp hi hữu trùng mã duy nhất `{examId, code}` trên MongoDB (ném lỗi `E11000`).
+**Tình huống:** Hàm `buildExamCode` sinh mã đề có hậu tố ngẫu nhiên (ví dụ `D3F9A1-XUONG1-NV001-A8F1`). Trong trường hợp hi hữu mã bị trùng ràng buộc duy nhất (SQL Server báo lỗi `2627`/`2601`).
 
-**Cách khắc phục:** Hàm `ensureExamCodeForEmployee` trong `exam-code-generation.service.js` chủ động bắt mã lỗi `11000`, tự động retry sinh lại mã đề mới với hậu tố ngẫu nhiên khác và tiếp tục lưu DB an toàn.
+**Cách khắc phục:** `exam-code-generation.service.js` bắt lỗi `2627`/`2601` khi sinh mã đề.
 
 ---
 
@@ -190,7 +190,7 @@ Tránh N+1 query bằng cách dùng `Set` thay vì query DB từng câu.
 
 **Cách khắc phục:**
 1. **Khóa chống click đúp / Concurrency lock**: Trước khi bắt đầu sinh đề, hệ thống cập nhật `publishLockedAt = new Date()`. Nếu request khác đến trong vòng 5 phút khi khóa chưa được giải phóng, hệ thống từ chối ngay với mã `PUBLISH_IN_PROGRESS`.
-2. **Quy tắc Single Active Exam**: Index partial unique `uniq_single_published_exam` trên CSDL MongoDB đảm bảo chỉ duy nhất 1 kỳ thi ở trạng thái `published`.
+2. **Quy tắc Single Active Exam**: Filtered unique index `UX_exams_one_published` trên SQL Server đảm bảo chỉ có 1 kỳ thi ở trạng thái `published`; lưu trữ kỳ cũ và đăng kỳ mới nằm trong cùng một transaction.
 3. **Cơ chế Force Override & Tự động Archive**: Khi publish kỳ thi mới, kỳ thi cũ tự động chuyển sang `archived`. Nếu có thí sinh đang thi trong kỳ thi cũ, hệ thống cung cấp API kiểm tra tác động (`/publish-impact`) và yêu cầu xác nhận `force: true`.
 
 ---
@@ -253,11 +253,11 @@ Hệ thống hiện dùng **HTTP polling** (client gọi API định kỳ) thay 
 
 ---
 
-### B3. Không sử dụng MongoDB Transaction (Atomicity dựa trên Service)
+### B3. Transaction chưa bao trùm toàn bộ thao tác nhiều bước
 
-Do hệ thống hướng tới khả năng triển khai linh hoạt trên các cụm MongoDB đơn lẻ (Standalone MongoDB) không bắt buộc Replica Set, các thao tác ghi dữ liệu nhiều bước (như Publish Exam tạo ExamCode + ExamCandidate) được bảo vệ bằng cơ chế **Idempotent Recovery** thay vì MongoDB Multi-document Transactions.
+Các thao tác chấm bài, tạo lượt thi, autosave, sửa đáp án, lưu trữ + đăng kỳ thi đã chạy trong SQL Server transaction (`withTransaction`). Một số thao tác dài (sinh mã đề và gán thí sinh khi publish, import) vẫn ghi từng bước và dựa vào khả năng chạy lại.
 
-**Hệ quả:** Trong trường hợp hi hữu server bị mất điện đúng tích tắc đang ghi CSDL, có thể tồn tại bản ghi mồ côi cần Leader bấm publish lại để hệ thống tự động hoàn tất.
+**Hệ quả:** Nếu server dừng giữa chừng các thao tác dài này, có thể còn dữ liệu dở dang, cần bấm publish / import lại.
 
 ---
 
@@ -269,9 +269,9 @@ Do hệ thống hướng tới khả năng triển khai linh hoạt trên các c
 
 ### B5. Sao lưu Phụ thuộc Công cụ Hệ điều hành & Google Drive
 
-- **mongodump / mongorestore** phải được cài sẵn trên server (`mongodb-database-tools`).
+- Dùng lệnh `BACKUP DATABASE` / `RESTORE DATABASE` của SQL Server: login cần quyền backup, restore, ALTER DATABASE; thư mục `SQL_BACKUP_DIR` phải để cả Node và dịch vụ SQL Server đọc/ghi được.
 - **Google Drive** lưu bản backup qua OAuth2 cá nhân. Refresh token cần được quản lý định kỳ để tránh hết hạn.
-- Khôi phục dữ liệu (`mongorestore --drop`) sẽ ghi đè toàn bộ dữ liệu CSDL hiện tại.
+- Khôi phục dữ liệu (`RESTORE ... WITH REPLACE`) ghi đè toàn bộ CSDL hiện tại; trong lúc đó API trả 503.
 
 ---
 

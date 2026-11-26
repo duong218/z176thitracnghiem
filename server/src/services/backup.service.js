@@ -12,14 +12,15 @@ import fssync from 'fs';
 import { google } from 'googleapis';
 import { env } from '../config/env.js';
 import { ApiError } from '../utils/api-error.js';
-import { sql, sqlPool, closeSqlPool } from '../db/sql-server.js';
+import { sql, sqlPool, closeSqlPool, openAdminPool, setDbMaintenance } from '../db/sql-server.js';
 
 const MAX_BACKUPS_KEPT = 5;
-const TMP_DIR = path.join(os.tmpdir(), 'z176-backups');
+const TMP_DIR = env.sqlBackupDir ?? path.join(os.tmpdir(), 'z176-backups');
 
 // Đảm bảo thư mục lưu file .bak tạm tồn tại trên server
 async function ensureTmpDir() {
-  await fs.mkdir(TMP_DIR, { recursive: true, mode: 0o700 }); // chỉ tiến trình server đọc được bản dump chưa mã hóa
+  // Thư mục tạm riêng: chỉ tiến trình server đọc được. SQL_BACKUP_DIR: không ép quyền vì SQL Server cũng phải đọc/ghi
+  await fs.mkdir(TMP_DIR, { recursive: true, ...(env.sqlBackupDir ? {} : { mode: 0o700 }) });
 }
 
 // Kiểm tra đầy đủ thông tin xác thực Google OAuth2 trong biến môi trường
@@ -136,10 +137,14 @@ async function dumpToLocalFile(prefix = 'z176-backup') {
   const filePath = path.join(TMP_DIR, fileName);
 
   const dbName = env.sqlServer.database.replace(/]/g, ']]');
-  const pool = await sqlPool();
-  await pool.request().input('bakPath', sql.NVarChar(1000), filePath).query(
-    `BACKUP DATABASE [${dbName}] TO DISK = @bakPath WITH FORMAT, INIT, NAME = N'Z176 Full Backup'`
-  );
+  const pool = await openAdminPool();
+  try {
+    await pool.request().input('bakPath', sql.NVarChar(1000), filePath).query(
+      `BACKUP DATABASE [${dbName}] TO DISK = @bakPath WITH FORMAT, INIT, NAME = N'Z176 Full Backup'`
+    );
+  } finally {
+    await pool.close().catch(() => {});
+  }
 
   const stat = await fs.stat(filePath);
   return { filePath, fileName, size: stat.size };
@@ -295,41 +300,44 @@ async function streamDriveFileToResponse(fileId, res) {
 // Khôi phục dữ liệu CSDL SQL Server từ file .bak / .bak.enc
 // Giải mã xong mới chạy RESTORE DATABASE: sai khóa thì dừng trước khi ghi đè, CSDL còn nguyên.
 async function restoreFromLocalFile(localFilePath) {
-  const decPath = `${localFilePath}.dec`;
+  await ensureTmpDir();
+  // File SQL Server đọc phải nằm trong thư mục backup (đường dẫn upload có thể SQL Server không đọc được)
+  const archive = path.join(TMP_DIR, `restore-${Date.now()}.bak`);
   let masterPool;
   try {
-    let archive = localFilePath;
     if (await isEncrypted(localFilePath)) {
-      await decryptFile(localFilePath, decPath);
-      archive = decPath;
+      await decryptFile(localFilePath, archive);
+    } else {
+      await fs.copyFile(localFilePath, archive);
     }
+    // SQL Server chạy tài khoản khác tiến trình Node nên cần quyền đọc file
+    if (env.sqlBackupDir) await fs.chmod(archive, 0o644);
 
     const dbName = env.sqlServer.database.replace(/]/g, ']]');
-    await closeSqlPool();
-    masterPool = await new sql.ConnectionPool({
-      server: env.sqlServer.host,
-      port: env.sqlServer.port,
-      database: 'master',
-      user: env.sqlServer.user,
-      password: env.sqlServer.password,
-      options: {
-        encrypt: env.sqlServer.encrypt,
-        trustServerCertificate: env.sqlServer.trustServerCertificate,
-      },
-    }).connect();
+    masterPool = await openAdminPool();
+    // Kiểm tra SQL Server đọc được file TRƯỚC khi ngắt kết nối người dùng
+    await masterPool.request().input('bakPath', sql.NVarChar(1000), archive).query(
+      'RESTORE VERIFYONLY FROM DISK = @bakPath'
+    );
 
-    await masterPool.request().query(`ALTER DATABASE [${dbName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE`);
+    setDbMaintenance(true);
+    await closeSqlPool();
     try {
+      // Gộp 1 batch để không kết nối nào chen vào giữa SINGLE_USER và RESTORE
       await masterPool.request().input('bakPath', sql.NVarChar(1000), archive).query(
-        `RESTORE DATABASE [${dbName}] FROM DISK = @bakPath WITH REPLACE`
+        `ALTER DATABASE [${dbName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+         RESTORE DATABASE [${dbName}] FROM DISK = @bakPath WITH REPLACE;`
       );
     } finally {
-      await masterPool.request().query(`ALTER DATABASE [${dbName}] SET MULTI_USER`).catch(() => {});
+      await masterPool.request().query(`ALTER DATABASE [${dbName}] SET MULTI_USER`).catch((err) => {
+        console.error('[backup] Không đưa được CSDL về MULTI_USER:', err.message);
+      });
     }
   } finally {
+    setDbMaintenance(false);
     if (masterPool) await masterPool.close().catch(() => {});
     await sqlPool().catch(() => {});
-    await cleanupLocalFile(decPath);
+    await cleanupLocalFile(archive);
   }
 }
 

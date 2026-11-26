@@ -67,6 +67,16 @@ export function createApp() {
 
   // --- Middleware tập trung xử lý lỗi toàn cục (Global Error Handler) ---
   app.use((err, _req, res, _next) => {
+    // SQL Server 8169: chuỗi không phải GUID (ID sai trên URL/body)
+    if (err.number === 8169) {
+      res.status(400).json({ success: false, message: 'Mã định danh không hợp lệ', code: 'INVALID_ID' });
+      return;
+    }
+    // SQL Server 2601/2627: trùng khóa duy nhất (thường do 2 yêu cầu cùng lúc)
+    if (err.number === 2601 || err.number === 2627) {
+      res.status(409).json({ success: false, message: 'Dữ liệu bị trùng, vui lòng tải lại trang và thử lại.', code: 'DUPLICATE_KEY' });
+      return;
+    }
     const statusCode = err.statusCode ?? 500;
     const isApiError = err instanceof ApiError;
     const message =

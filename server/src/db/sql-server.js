@@ -2,6 +2,12 @@ import sql from 'mssql';
 import { env, assertSqlServerEnv } from '../config/env.js';
 
 let pool;
+let maintenance = false;
+
+// Bật trong lúc RESTORE: không cho request/cron mở lại kết nối (sẽ chiếm mất chế độ SINGLE_USER)
+export function setDbMaintenance(value) {
+  maintenance = value;
+}
 
 function config(database = env.sqlServer.database) {
   assertSqlServerEnv();
@@ -19,7 +25,18 @@ function config(database = env.sqlServer.database) {
   };
 }
 
+// Kết nối riêng tới master cho BACKUP/RESTORE: lệnh có thể chạy lâu hơn timeout mặc định 15 giây
+export async function openAdminPool() {
+  return new sql.ConnectionPool({ ...config('master'), requestTimeout: 60 * 60 * 1000 }).connect();
+}
+
 export async function sqlPool() {
+  if (maintenance) {
+    throw Object.assign(new Error('Hệ thống đang khôi phục dữ liệu, vui lòng thử lại sau.'), {
+      statusCode: 503,
+      code: 'DB_MAINTENANCE',
+    });
+  }
   if (!pool) pool = await sql.connect(config());
   return pool;
 }

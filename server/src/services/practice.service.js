@@ -262,7 +262,7 @@ export async function checkPracticeAnswer(userId, sessionId, questionId, selecte
     };
   }
 
-  const ids = (Array.isArray(selectedAnswerIds) ? selectedAnswerIds : []).map(String);
+  const ids = [...new Set((Array.isArray(selectedAnswerIds) ? selectedAnswerIds : []).map(String))];
   if (ids.length === 0) throw new ApiError(400, 'Vui lòng chọn ít nhất một đáp án', 'PRACTICE_NO_SELECTION');
   const isCorrect = isSameAnswerSet(new Set(correctIds), ids);
 
@@ -309,7 +309,7 @@ export async function submitPractice(userId, sessionId, answers = []) {
   }
 
   const answerByQuestion = new Map(
-    (Array.isArray(answers) ? answers : []).map((a) => [String(a.questionId), (a.selectedAnswerIds || []).map(String)])
+    (Array.isArray(answers) ? answers : []).map((a) => [String(a.questionId), [...new Set((a.selectedAnswerIds || []).map(String))]])
   );
 
   const pqRes = await query(

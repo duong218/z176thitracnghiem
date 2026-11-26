@@ -7,7 +7,8 @@
  *   --ramp 0      : tất cả đăng nhập CÙNG LÚC (kịch bản xấu nhất)
  *   --ramp 20     : đăng nhập rải ngẫu nhiên trong 20 giây
  *   --duration 90 : thời gian làm bài (giây) trước khi nộp; nên < 15 phút (access token sống 15 phút)
- * Cần: đã chạy seed-loadtest.js và server đang chạy. Chỉ dùng tài khoản giả lt0001...
+ * Cần: server đang chạy, có kỳ thi đã đăng, và CSDL test đã có sẵn các tài khoản giả lt0001... (mật khẩu bằng PASSWORD bên dưới).
+ * LƯU Ý: bản SQL Server CHƯA có script tạo các tài khoản giả này (script cũ cho MongoDB đã bị xóa) nên phải tạo trước khi chạy.
  */
 const argv = Object.fromEntries(
   process.argv.slice(2).reduce((acc, cur, i, arr) => (cur.startsWith('--') ? [...acc, [cur.slice(2), arr[i + 1]]] : acc), []),
@@ -18,7 +19,7 @@ const DURATION_SEC = Number(argv.duration ?? 90);
 const BASE = argv.base ?? 'http://127.0.0.1:5000';
 const PASSWORD = 'LoadTest#12345';
 const TIMEOUT_MS = 30_000;
-const DO_SUBMIT = (argv.submit ?? '1') !== '0'; // --submit 0: bỏ bước nộp bài (vd khi chạy trên FerretDB không hỗ trợ findAndModify projection)
+const DO_SUBMIT = (argv.submit ?? '1') !== '0'; // --submit 0: bỏ bước nộp bài
 
 const HEARTBEAT_MS = 15_000;
 const ME_MS = 15_000;

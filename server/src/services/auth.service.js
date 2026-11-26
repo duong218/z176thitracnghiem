@@ -115,7 +115,7 @@ async function registerFailedLogin(user) {
   await query(
     `UPDATE users SET
        lock_until = CASE WHEN failed_login_attempts + 1 >= @max THEN @until ELSE lock_until END,
-       failed_login_attempts = CASE WHEN failed_login_attempts + 1 >= @max THEN 0 ELSE failedLoginAttempts + 1 END,
+       failed_login_attempts = CASE WHEN failed_login_attempts + 1 >= @max THEN 0 ELSE failed_login_attempts + 1 END,
        updated_at = SYSUTCDATETIME()
      WHERE id = @id`,
     {

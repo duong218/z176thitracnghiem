@@ -79,7 +79,7 @@ export async function upsertDepartmentForImport({ name, code, description }) {
   try {
     const updateRes = await query(
       `UPDATE departments 
-       SET is_active = 1, name = @name, code = ISNULL(@code, code), description = ISNULL(@description, description), updated_at = SYSUTCDATETIME()
+       SET is_active = 1, name = @name, code = COALESCE(@code, code), description = COALESCE(@description, description), updated_at = SYSUTCDATETIME()
        OUTPUT INSERTED.*
        WHERE id = @id`,
       {
@@ -315,7 +315,7 @@ export async function ensureDepartmentsForImport(items, providedCodes = {}) {
       }
       if (step.reactivate || step.setCode) {
         await query(
-          `UPDATE departments SET is_active = 1, code = ISNULL(@code, code), updated_at = SYSUTCDATETIME() WHERE id = @id`,
+          `UPDATE departments SET is_active = 1, code = COALESCE(@code, code), updated_at = SYSUTCDATETIME() WHERE id = @id`,
           { code: step.setCode ? step.code : null, id: step.deptId }
         );
       }
