@@ -768,12 +768,12 @@ export const CandidateDashboard = ({ onOpenExam, examModalOpen, activeExam }) =>
                     <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
                       <div className="text-sm text-slate-500 mb-1">Số lượt đã thi (kỳ thi hiện tại)</div>
                       <div className="text-xl font-bold text-[#0F172A]">
-                        {attemptsForActiveExam}/{maxAttempts}
+                        {examStatus ? `${attemptsForActiveExam}/${maxAttempts}` : '—'}
                       </div>
                     </div>
                     <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
                       <div className="text-sm text-slate-500 mb-1">Lượt còn lại</div>
-                      <div className="text-xl font-bold text-[#0F172A]">{attemptsLeft}</div>
+                      <div className="text-xl font-bold text-[#0F172A]">{examStatus ? attemptsLeft : '—'}</div>
                     </div>
                     <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
                       <div className="text-sm text-slate-500 mb-1">Điểm cao nhất</div>
@@ -791,7 +791,7 @@ export const CandidateDashboard = ({ onOpenExam, examModalOpen, activeExam }) =>
                         đăng kỳ thi mới.
                       </span>
                     </div>
-                  ) : (
+                  ) : examStatusErrorCode ? null : (
                     <div className="p-4 bg-[#FFFBEB] border border-[#F6AD37]/40 rounded-lg text-[#0F172A] text-sm flex items-start gap-2.5">
                       <Clock className="w-5 h-5 shrink-0 mt-0.5" />
                       <span>
@@ -835,10 +835,11 @@ export const CandidateDashboard = ({ onOpenExam, examModalOpen, activeExam }) =>
 
                   {activeExam && !examStatusLoading && !canStartExam && (
                     <p className="text-center text-sm text-slate-500">
-                      {examStatusErrorCode === 'CANDIDATE_OUT_OF_SCOPE' ? (
+                      {examStatusErrorCode === 'CANDIDATE_OUT_OF_SCOPE' || examStatusErrorCode === 'NOT_REGISTERED_FOR_EXAM' ? (
                         <>
-                          Kỳ thi "{activeExam.title}" không dành cho phòng ban của bạn. Vui lòng liên hệ
-                          Người ra đề hoặc Quản trị viên nếu bạn cho rằng đây là nhầm lẫn.
+                          Bạn không nằm trong danh sách thí sinh của kỳ thi "{activeExam.title}" (kỳ thi có thể không
+                          dành cho phòng ban của bạn). Vui lòng liên hệ Người ra đề hoặc Quản trị viên nếu bạn cho
+                          rằng đây là nhầm lẫn.
                         </>
                       ) : examStatusErrorCode === 'ROLE_NOT_ELIGIBLE' ? (
                         <>
