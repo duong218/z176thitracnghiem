@@ -1198,6 +1198,9 @@ export async function updateEmployeeDepartments({ userId, departmentId, extraDep
     });
   }
 
+  // Đổi phòng xong thì gán luôn vào kỳ thi đang mở (no-op nếu đã là thí sinh)
+  await assignEmployeeToActiveExamIfAny({ ...employee, departmentId: primaryId }).catch(() => {});
+
   const deptRes = await query('SELECT name, code FROM departments WHERE id = @id', { id: primaryId });
   const primaryDept = mapRow(deptRes.recordset[0]);
 

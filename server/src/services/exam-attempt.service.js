@@ -9,6 +9,7 @@ import { ApiError } from '../utils/api-error.js';
 import {
   getEmployeeRoleOptions,
   assignCandidateRole,
+  assignEmployeeToActiveExamIfAny,
   isCommonCompensationEnabled,
 } from './exam-code-generation.service.js';
 import {
@@ -151,7 +152,8 @@ async function resolveCandidateContext(userId) {
     'SELECT * FROM exam_candidates WHERE exam_id = @examId AND employee_id = @empId',
     { examId: exam.id, empId: employee.id }
   );
-  const examCandidate = mapRow(candRes.recordset[0]);
+  // Kiêm nhiệm: phòng chính ngoài lịch thi nhưng phòng kiêm nhiệm được thi -> tự gán theo phòng hợp lệ (null nếu không phòng nào được thi)
+  const examCandidate = mapRow(candRes.recordset[0]) ?? (await assignEmployeeToActiveExamIfAny(employee));
   if (!examCandidate) {
     throw new ApiError(403, 'Bạn không nằm trong danh sách thí sinh của kỳ thi này', 'NOT_REGISTERED_FOR_EXAM');
   }
