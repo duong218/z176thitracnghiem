@@ -1,0 +1,44 @@
+{
+  "name": "z176-exam-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0 <25.0.0"
+  },
+  "scripts": {
+    "dev": "node --watch-path=src src/index.js",
+    "start": "node src/index.js",
+    "seed": "node src/scripts/seed-cli.js",
+    "reset-admin": "node src/scripts/reset-admin-cli.js",
+    "backup": "node src/scripts/backup-cli.js",
+    "db:init": "node src/scripts/init-sql-database.js",
+    "seed:sql": "node src/scripts/seed-sql-cli.js",
+    "lint": "node -e \"process.exit(0)\""
+  },
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "bcryptjs": "^3.0.2",
+    "cloudinary": "^2.10.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "googleapis": "^175.0.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mammoth": "^1.8.0",
+    "mongodb": "^7.5.0",
+    "mongoose": "^8.19.1",
+    "mssql": "^12.8.1",
+    "multer": "^2.2.0",
+    "node-cron": "^4.6.0",
+    "unpdf": "^1.8.1",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "devDependencies": {
+    "open": "^11.0.1"
+  }
+}
